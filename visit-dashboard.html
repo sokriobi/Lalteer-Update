@@ -1,0 +1,216 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Visit Dashboard - Lal Teer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/theme.css?v=20260409-12">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand-box">
+        <img src="assets/img/logo.png" alt="Lal Teer">
+        <div>
+          <div class="brand-title">Lal Teer</div>
+          <span class="brand-sub">Analytics Workspace</span>
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Dashboards</div>
+        <a class="nav-link" href="sales-dashboard.html">
+          <span class="nav-dot"></span>Sales Dashboard
+        </a>
+        <a class="nav-link active" href="visit-dashboard.html">
+          <span class="nav-dot"></span>Visit Dashboard
+        </a>
+        <a class="nav-link" href="#" data-logout>
+          <span class="nav-dot"></span>Logout
+        </a>
+      </div>
+      <div class="user-card">
+        <div class="user-avatar" data-user-avatar>A</div>
+        <div>
+          <div class="user-name" data-user-name>Admin</div>
+          <div class="user-role" data-user-role>Member</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <section class="hero">
+        <div class="top-row">
+          <div class="hero-title">
+            <img src="assets/img/logo.png" alt="Lal Teer">
+            <div>
+              <h1>Visit Dashboard</h1>
+            </div>
+          </div>
+          <div class="filter-bar">
+            <select id="dmTerritoryFilter">
+              <option value="All">DM Territory</option>
+            </select>
+            <select id="rmTerritoryFilter">
+              <option value="All">RM Territory</option>
+            </select>
+            <select id="tmAreaFilter">
+              <option value="All">TM Area</option>
+            </select>
+            <input type="date" id="dateFrom">
+            <input type="date" id="dateTo">
+            <button class="btn btn-primary" id="btnApply">Apply</button>
+            <button class="btn btn-secondary" id="btnRefresh">Refresh</button>
+          </div>
+        </div>
+        <div class="meta-row">
+          <div id="lastUpdated">Last updated: —</div>
+        </div>
+      </section>
+
+      <h2 class="section-title">Visit & Operational KPIs</h2>
+      <section class="visit-kpi-shell">
+        <section id="visitKpiGrid" class="kpi-grid"></section>
+        <section class="card kpi-card visit-role-card" style="--accent:#61a7e8">
+          <div class="visit-role-head">
+            <div class="kpi-copy">
+              <div class="kpi-label">Roles</div>
+            </div>
+            <div class="kpi-icon">RU</div>
+          </div>
+          <div class="card-body visit-role-card-body">
+            <table class="visit-role-table">
+              <thead>
+                <tr>
+                  <th>Role</th>
+                  <th>Total Users</th>
+                  <th>Active Users</th>
+                </tr>
+              </thead>
+              <tbody id="visitRoleSummaryBody">
+                <tr>
+                  <td colspan="3">Loading...</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+      <section id="visitMiniGrid" class="mini-grid"></section>
+
+      <!-- Charts Section -->
+      <section class="analytics-grid">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Orders vs Outlets</h3>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-wrap tall">
+              <canvas id="ordersVsOutlets"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Visited vs Not Visited</h3>
+            </div>
+          </div>
+          <div class="card-body visit-coverage-body">
+            <div class="chart-wrap small visit-coverage-wrap">
+              <canvas id="visitCoverageChart"></canvas>
+            </div>
+            <div id="visitCoverageBreakdown" class="visit-coverage-breakdown"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="single-chart-section">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>DM Territory Visit vs Productive</h3>
+              <p>Territory-wise total visit and productive visit comparison</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-wrap analysis-chart-wrap">
+              <canvas id="dmTerritoryChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="two-col">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Operational Ratios</h3>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-wrap">
+              <canvas id="opsRatio"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Visiting hrs vs Active Users</h3>
+              <p>Unique Department Code visits and active users by hour</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-wrap">
+              <canvas id="visitingHoursChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="two-col">
+        <div class="card insight-panel">
+          <div class="card-header" style="padding:0 0 8px">
+            <div>
+              <h3>Operational Insights</h3>
+            </div>
+          </div>
+          <div id="visitInsightList" class="insight-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Operational Summary</h3>
+            </div>
+          </div>
+          <div class="card-body">
+            <table class="metrics-table">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Value</th>
+                  <th>Interpretation</th>
+                </tr>
+              </thead>
+              <tbody id="visitTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="assets/js/common.js?v=20260409-12"></script>
+  <script src="assets/js/visit-dashboard-v2.js?v=20260409-12"></script>
+</body>
+</html>

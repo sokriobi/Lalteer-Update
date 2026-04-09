@@ -1,0 +1,142 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>API Debug Test</title>
+    <style>
+        body { font-family: monospace; margin: 20px; background: #1e1e1e; color: #fff; }
+        .test { margin: 20px 0; padding: 15px; border: 1px solid #333; background: #0d0d0d; }
+        .pass { border-left: 5px solid #2db86d; }
+        .fail { border-left: 5px solid #e25b57; }
+        .pending { border-left: 5px solid #f2b233; }
+        code { background: #333; padding: 2px 5px; border-radius: 3px; }
+        h1 { color: #61a7e8; }
+        button { padding: 10px 20px; margin: 10px 0; cursor: pointer; background: #2db86d; border: none; color: white; border-radius: 5px; }
+    </style>
+</head>
+<body>
+    <h1>🔍 Lalteer Dashboard - API Diagnostic Test</h1>
+    
+    <div id="results"></div>
+    
+    <button onclick="runAllTests()">Run All Tests</button>
+    <button onclick="testLogin()">Test Login</button>
+    <button onclick="clearResults()">Clear</button>
+
+    <script>
+        const BASE_URL = window.location.origin;
+        const TEST_EMAIL = 'super@lalteer.com';
+        const TEST_PASSWORD = 'demo1234';
+        
+        const results = document.getElementById('results');
+        
+        function log(title, status, message, details = '') {
+            const div = document.createElement('div');
+            div.className = `test ${status}`;
+            div.innerHTML = `
+                <strong>[${status.toUpperCase()}]</strong> ${title}<br>
+                <small>URL: <code>${message}</code></small>
+                ${details ? `<pre>${JSON.stringify(details, null, 2)}</pre>` : ''}
+            `;
+            results.appendChild(div);
+            console.log(`[${status}] ${title}:`, message, details);
+        }
+        
+        function clearResults() { results.innerHTML = ''; }
+        
+        async function testEndpoint(title, url, options = {}) {
+            try {
+                const res = await fetch(url, options);
+                const data = res.status === 204 ? 'No content' : await res.text();
+                const isJson = res.headers.get('content-type')?.includes('json');
+                
+                if (res.ok || res.status === 422) {
+                    log(title, 'pass', url, { 
+                        status: res.status, 
+                        type: res.headers.get('content-type'),
+                        preview: isJson ? JSON.parse(data) : data.substring(0, 100)
+                    });
+                } else {
+                    log(title, 'fail', url, { 
+                        status: res.status, 
+                        error: data.substring(0, 200)
+                    });
+                }
+            } catch (err) {
+                log(title, 'fail', url, { error: err.message });
+            }
+        }
+        
+        async function testLogin() {
+            const body = JSON.stringify({
+                email: TEST_EMAIL,
+                password: TEST_PASSWORD,
+                device_name: 'diagnostic-test'
+            });
+            
+            await testEndpoint(
+                'Login API',
+                `${BASE_URL}/api/v1/login`,
+                { 
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body
+                }
+            );
+        }
+        
+        async function testDailyReports(token) {
+            const from = '2026-04-01';
+            const to = '2026-04-05';
+            const url = `${BASE_URL}/api/v1/daily-reports?range=${from}_${to}&only=orderCreated`;
+            
+            await testEndpoint(
+                'Daily Reports API',
+                url,
+                { 
+                    headers: { 
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                }
+            );
+        }
+        
+        async function runAllTests() {
+            clearResults();
+            log('Environment', 'pending', `Base URL: ${BASE_URL}`, { origin: window.location.origin });
+            
+            // Test health
+            await testEndpoint('Health Check', `${BASE_URL}/health`);
+            
+            // Test login
+            await testLogin();
+            
+            // Test with stored token
+            const token = localStorage.getItem('auth_token') || sessionStorage.getItem('auth_token');
+            if (token) {
+                log('Stored Token', 'pending', 'Found in storage', { token: token.substring(0, 20) + '...' });
+                await testDailyReports(token);
+            } else {
+                log('Stored Token', 'fail', 'No token found in localStorage or sessionStorage', {});
+            }
+            
+            // Test common.js
+            try {
+                const PROXY = window.location.origin;
+                log('PROXY Variable', 'pass', `PROXY = ${PROXY}`, {});
+            } catch (err) {
+                log('PROXY Variable', 'fail', 'Error accessing PROXY', { error: err.message });
+            }
+        }
+        
+        // Auto-run on load
+        window.addEventListener('load', () => {
+            log('Page Load', 'pass', `Loaded at ${new Date().toISOString()}`, { 
+                userAgent: navigator.userAgent.substring(0, 50) 
+            });
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Lal Teer Login</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/login.css">
+</head>
+<body>
+  <div class="login-page">
+    <!-- Hero Panel -->
+    <div class="hero-panel">
+      <div class="hero-overlay"></div>
+      <img class="hero-logo" src="assets/img/logo.png" alt="Lal Teer">
+      <div class="hero-copy">
+        <h1>Lal Teer Analytics</h1>
+        <p>Sales and visit intelligence for fast daily review. Use the same live API data, now in a cleaner branded experience.</p>
+      </div>
+    </div>
+
+    <!-- Form Panel -->
+    <div class="form-panel">
+      <div class="form-card">
+        <img class="form-logo" src="assets/img/logo.png" alt="Lal Teer">
+        <h2>Sign in</h2>
+        <p class="muted">Continue to Sales and Visit dashboards</p>
+        <div id="alert" class="alert hidden"></div>
+        <form id="loginForm">
+          <label>
+            Email
+            <input id="email" type="email" required>
+          </label>
+          <label>
+            Password
+            <input id="password" type="password" required>
+          </label>
+          <label class="remember">
+            <input id="rememberMe" type="checkbox"> Remember me
+          </label>
+          <button id="submitBtn" type="submit">
+            <span id="btnText">Sign In</span>
+            <span id="btnSpinner" class="hidden">…</span>
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <script src="assets/js/login-safe.js?v=20260408-4"></script>
+</body>
+</html>

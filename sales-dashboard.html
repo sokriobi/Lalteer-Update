@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sales Dashboard - Lal Teer</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="assets/css/theme.css?v=20260409-10">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="node_modules/xlsx/dist/xlsx.full.min.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="brand-box">
+        <img src="assets/img/logo.png" alt="Lal Teer">
+        <div>
+          <div class="brand-title">Lal Teer</div>
+          <span class="brand-sub">Analytics Workspace</span>
+        </div>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">Dashboards</div>
+        <a class="nav-link active" href="sales-dashboard.html">
+          <span class="nav-dot"></span>Sales Dashboard
+        </a>
+        <a class="nav-link" href="visit-dashboard.html">
+          <span class="nav-dot"></span>Visit Dashboard
+        </a>
+        <a class="nav-link" href="#" data-logout>
+          <span class="nav-dot"></span>Logout
+        </a>
+      </div>
+      <div class="user-card">
+        <div class="user-avatar" data-user-avatar>A</div>
+        <div>
+          <div class="user-name" data-user-name>Admin</div>
+          <div class="user-role" data-user-role>Member</div>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <section class="hero">
+        <div class="top-row">
+          <div class="hero-title">
+            <img src="assets/img/logo.png" alt="Lal Teer">
+            <div>
+              <h1>Sales Dashboard</h1>
+            </div>
+          </div>
+          <div class="filter-bar">
+            <select id="dmTerritoryFilter">
+              <option value="All">DM Territory</option>
+            </select>
+            <select id="rmTerritoryFilter">
+              <option value="All">RM Territory</option>
+            </select>
+            <select id="tmAreaFilter">
+              <option value="All">TM Area</option>
+            </select>
+            <input type="date" id="dateFrom">
+            <input type="date" id="dateTo">
+            <button class="btn btn-primary" id="btnApply">Apply</button>
+            <button class="btn btn-secondary" id="btnRefresh">Refresh</button>
+          </div>
+        </div>
+        <div class="meta-row">
+          <div id="lastUpdated">Last updated: —</div>
+        </div>
+      </section>
+
+      <h2 class="section-title">Sales KPIs</h2>
+      <section id="kpiGrid" class="kpi-grid"></section>
+      <section id="miniGrid" class="mini-grid"></section>
+
+      <!-- Charts Section -->
+      <section class="analytics-grid">
+        <div class="card" id="supplierVisitCard">
+          <div class="card-header">
+            <div>
+              <h3>Visit by Supplier Code</h3>
+            </div>
+          </div>
+          <div class="card-body supplier-visit-body">
+            <div class="supplier-visit-shell">
+              <div id="supplierVisitMetaLeft" class="supplier-visit-side-metric supplier-visit-side-metric-stack"></div>
+              <div class="chart-wrap supplier-donut-wrap">
+                <canvas id="supplierVisitChart"></canvas>
+              </div>
+              <div id="supplierVisitBreakdown" class="supplier-breakdown supplier-breakdown-side"></div>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Payment Status</h3>
+            </div>
+          </div>
+          <div class="card-body payment-status-body">
+            <div id="paymentStatusLegend" class="payment-status-legend"></div>
+            <div class="payment-status-shell">
+              <div class="chart-wrap small payment-status-chart-wrap">
+                <canvas id="paymentDonut"></canvas>
+              </div>
+              <div id="paymentStatusMeta" class="payment-status-meta"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="two-col">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Financial Comparison</h3>
+              <p>Quick reading of all major value buckets</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-wrap tall">
+              <canvas id="financialChart"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Performance Ratios</h3>
+              <p>Fast ratio review from current totals</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-wrap">
+              <canvas id="ratioChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="single-chart-section">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>MTD Target</h3>
+              <p>Target vs achievement for the selected month</p>
+            </div>
+          </div>
+          <div class="card-body target-card-body">
+            <div class="chart-wrap small target-donut-wrap">
+              <canvas id="targetAchievementChart"></canvas>
+            </div>
+            <div id="targetAchievementMeta" class="target-metrics"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="two-col">
+        <div class="card insight-panel">
+          <div class="card-header" style="padding:0 0 8px">
+            <div>
+              <h3>Business Insights</h3>
+              <p>Auto summary from fetched values</p>
+            </div>
+          </div>
+          <div id="insightList" class="insight-list"></div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Metric Summary</h3>
+              <p>Clean readable snapshot</p>
+            </div>
+          </div>
+          <div class="card-body">
+            <table class="metrics-table">
+              <thead>
+                <tr>
+                  <th>Metric</th>
+                  <th>Value</th>
+                  <th>Ratio</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody id="summaryTable"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="analytics-grid sales-analysis-grid">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Brand-wise Ordered vs Delivered</h3>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-wrap analysis-chart-wrap">
+              <canvas id="brandComparisonChart"></canvas>
+            </div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Category-wise Ordered vs Delivered</h3>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-wrap analysis-chart-wrap">
+              <canvas id="categoryComparisonChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="single-chart-section">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Date-wise Ordered vs Delivered</h3>
+            </div>
+          </div>
+          <div class="card-body">
+            <div class="chart-wrap analysis-chart-wrap">
+              <canvas id="dateComparisonChart"></canvas>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="assets/js/common.js?v=20260409-10"></script>
+  <script src="assets/js/sales-dashboard.js?v=20260409-10"></script>
+</body>
+</html>
