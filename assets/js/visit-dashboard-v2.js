@@ -203,10 +203,10 @@ function renderVisitKpis(d) {
 
   document.getElementById('visitMiniGrid').innerHTML = [
     ['Outlet Utilization', fmtNumber(d.orderPerOutlet), colors.teal],
-    ['Pending Pressure', fmtPct(d.pendingRate), colors.orange],
-    ['Rejected Pressure', fmtPct(d.rejectedRate), colors.red],
-    ['Collection Strength', fmtPct(d.acceptedRate), colors.green],
-    ['Delivery Gap', fmtCurrency(d.deliveryGap), colors.red],
+    ['Dealer Coverage', uniqueVisited.percentDisplay, colors.blue],
+    ['Not Visited Rate', fmtPct(uniqueVisited.dealerCount ? 1 - (uniqueVisited.percent || 0) : 0), colors.red],
+    ['Orders Generated', fmtNumber(d.ordersCreated), colors.green],
+    ['Total Dealers', fmtNumber(uniqueVisited.dealerCount || 0), colors.purple],
     ['Activity Signal', d.outletsVisited >= d.ordersCreated ? 'Wide reach' : 'Dense orders', colors.blue]
   ].map(([l, v, c]) => `<div class="card mini-card"><span>${l}</span><strong style="color:${c}">${v}</strong><span>Visit and field-operation interpretation</span></div>`).join('');
   return;
@@ -412,6 +412,26 @@ function renderDmTerritoryChart(summary) {
   });
 }
 
+function renderDmTerritoryTable(summary) {
+  const tbody = document.getElementById('dmTerritoryTbody');
+  if (!tbody) return;
+
+  if (!summary || !summary.length) {
+    tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 20px;">No data available</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = summary.map((item, index) => `
+    <tr style="transition: background-color 0.2s ease;" onmouseover="this.style.backgroundColor='rgba(255,255,255,0.03)'" onmouseout="this.style.backgroundColor='transparent'">
+      <td style="padding: 14px 16px; border-bottom: 1px solid var(--border-color); font-weight: 500; font-size: 14px; color: var(--text-primary);">${item.dmTerritory}</td>
+      <td style="padding: 14px 16px; border-bottom: 1px solid var(--border-color); font-size: 14px; color: var(--text-secondary);">${fmtNumber(item.totalVisit)}</td>
+      <td style="padding: 14px 16px; border-bottom: 1px solid var(--border-color); font-size: 14px; color: var(--text-secondary);">${fmtNumber(item.productiveVisit)}</td>
+      <td style="padding: 14px 16px; border-bottom: 1px solid var(--border-color); font-size: 14px; color: var(--text-secondary);">${fmtNumber(item.totalQty)}</td>
+      <td style="padding: 14px 16px; border-bottom: 1px solid var(--border-color); font-size: 14px; font-weight: 500; color: #34d399;">${fmtCurrency(item.totalOrdered)}</td>
+    </tr>
+  `).join('');
+}
+
 function renderVisitCharts(d, visitCoverageSummary, hourlySummary) {
   makeChart('ordersVsOutlets', {
     type: 'bar',
@@ -471,7 +491,8 @@ async function load() {
   const to = dateTo.value;
   const dealerBaseTo = new Date().toISOString().slice(0, 10);
   const slicers = getTerritorySlicerState();
-  document.getElementById('lastUpdated').textContent = 'Loading…';
+  const loadStartTime = performance.now();
+  document.getElementById('lastUpdated').innerHTML = '<div style="text-align: center; font-size: 20px; color: #ffffff; font-weight: 600; margin-right: 4px;">Loading...</div>';
 
   try {
     const [d, dealerBaseOutletJson, checkinJson, orderSummaryJson, deliverySummaryJson, territoriesJson, userBulkJson] = await Promise.all([
@@ -561,11 +582,28 @@ async function load() {
     renderRoleUserSummary(roleUserSummary);
     renderVisitCharts(filteredD, visitCoverageSummary, hourlySummary);
     renderDmTerritoryChart(dmTerritorySummary);
+    renderDmTerritoryTable(dmTerritorySummary);
     renderVisitInsights(filteredD);
-    document.getElementById('lastUpdated').textContent = `Last updated: ${new Date().toLocaleString()}`;
+
+    const durationSec = ((performance.now() - loadStartTime) / 1000).toFixed(1);
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); 
+    const formattedTime = now.toLocaleTimeString('en-US');
+    
+    document.getElementById('lastUpdated').innerHTML = `
+      <div style="text-align: center; font-size: 18px; font-weight: 600; color: #ffffff; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0; margin-right: 4px;">
+        <span><span style="color: rgba(255,255,255,0.7); font-weight: 500;">Last Updated:</span> ${formattedDate}, ${formattedTime}</span>
+        <span style="color: rgba(255,255,255,0.3);">|</span>
+        <span><span style="color: rgba(255,255,255,0.7); font-weight: 500;">Refreshed in:</span> ${durationSec} seconds</span>
+      </div>
+    `;
   } catch (err) {
     console.error('Visit dashboard error:', err);
-    document.getElementById('lastUpdated').textContent = `Error: ${err.message}`;
+    document.getElementById('lastUpdated').innerHTML = `
+      <div style="text-align: center; font-size: 14.5px; font-weight: 600; color: #ef4444; padding: 12px 0;">
+        Error reloading data: ${err.message}
+      </div>
+    `;
   }
 }
 
@@ -583,6 +621,40 @@ document.getElementById('btnRefresh').onclick = load;
     load();
   };
 });
+
+const toggleDmTableBtn = document.getElementById('toggleDmTableBtn');
+if (toggleDmTableBtn) {
+  let showingTable = false;
+  toggleDmTableBtn.addEventListener('click', () => {
+    showingTable = !showingTable;
+    const chartContainer = document.getElementById('dmChartContainer');
+    const tableContainer = document.getElementById('dmTableContainer');
+    
+    if (showingTable) {
+      chartContainer.style.display = 'none';
+      tableContainer.style.display = 'block';
+      toggleDmTableBtn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px; color: var(--teal);">
+          <line x1="18" y1="20" x2="18" y2="10"></line>
+          <line x1="12" y1="20" x2="12" y2="4"></line>
+          <line x1="6" y1="20" x2="6" y2="14"></line>
+        </svg>
+        Click to view chart
+      `;
+    } else {
+      chartContainer.style.display = 'block';
+      tableContainer.style.display = 'none';
+      toggleDmTableBtn.innerHTML = `
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px; color: var(--teal);">
+          <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+          <line x1="3" y1="9" x2="21" y2="9"></line>
+          <line x1="9" y1="21" x2="9" y2="9"></line>
+        </svg>
+        Click to view KPI table
+      `;
+    }
+  });
+}
 document.querySelectorAll('[data-logout]').forEach((el) => el.onclick = (e) => { e.preventDefault(); logout(); });
 load();
 

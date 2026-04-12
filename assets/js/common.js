@@ -112,43 +112,96 @@ async function readJsonResponse(res, fallbackMessage = 'Request failed') {
 // ============================================================================
 
 async function apiFetch(from, to, only) {
-  const params = new URLSearchParams({
-    range: `${from},${to}`,
-    only
-  });
-  const res = await fetch(
-    `${PROXY}${REPORTS_EP}?${params.toString()}`,
-    { headers: authHeaders() }
-  );
-  if (!res.ok) {
-    let detail = '';
-    try {
-      const payload = await readJsonResponse(res, `API failed for ${only}`);
-      detail = payload?.message || payload?.error || '';
-    } catch {}
-    throw new Error(detail ? `API failed for ${only}: ${detail}` : `API failed for ${only}`);
+  const fromDate = new Date(from);
+  const toDate = new Date(to);
+  fromDate.setHours(0, 0, 0, 0);
+  toDate.setHours(0, 0, 0, 0);
+
+  const chunks = [];
+  let currentStart = new Date(fromDate);
+  while (currentStart <= toDate) {
+    let currentEnd = new Date(currentStart);
+    currentEnd.setDate(currentEnd.getDate() + 30);
+    if (currentEnd > toDate) {
+      currentEnd = new Date(toDate);
+    }
+
+    const fStr = new Date(currentStart.getTime() - (currentStart.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
+    const tStr = new Date(currentEnd.getTime() - (currentEnd.getTimezoneOffset() * 60000)).toISOString().slice(0, 10);
+    chunks.push({ start: fStr, end: tStr });
+
+    currentStart = new Date(currentEnd);
+    currentStart.setDate(currentStart.getDate() + 1);
   }
-  return readJsonResponse(res, `API failed for ${only}`);
+
+  const responses = await Promise.all(chunks.map(async (chunk) => {
+    const params = new URLSearchParams({
+      range: `${chunk.start},${chunk.end}`,
+      only
+    });
+    const res = await fetch(
+      `${PROXY}${REPORTS_EP}?${params.toString()}`,
+      { headers: authHeaders() }
+    );
+    if (!res.ok) {
+      let detail = '';
+      try {
+        const payload = await readJsonResponse(res, `API failed for ${only}`);
+        detail = payload?.message || payload?.error || '';
+      } catch { }
+      throw new Error(detail ? `API failed for ${only}: ${detail}` : `API failed for ${only}`);
+    }
+    return readJsonResponse(res, `API failed for ${only}`);
+  }));
+
+  if (responses.length === 1) return responses[0];
+
+  const merged = { dailyReports: {} };
+  if (only === 'paymentInfo') {
+    merged.dailyReports.paymentInfo = { total: 0, accepted: 0, pending: 0, rejected: 0 };
+    for (const r of responses) {
+      const p = r?.dailyReports?.paymentInfo || {};
+      merged.dailyReports.paymentInfo.total += Number(p.total || 0);
+      merged.dailyReports.paymentInfo.accepted += Number(p.accepted || 0);
+      merged.dailyReports.paymentInfo.pending += Number(p.pending || 0);
+      merged.dailyReports.paymentInfo.rejected += Number(p.rejected || 0);
+    }
+  } else {
+    merged.dailyReports[only] = 0;
+    for (const r of responses) {
+      merged.dailyReports[only] += Number(r?.dailyReports?.[only] || 0);
+    }
+  }
+  return merged;
 }
 
-async function fetchOutletReportJson(from, to, ut = 1) {
-  const params = new URLSearchParams({
-    range: `${from},${to}`,
-    ut: String(ut)
-  });
-  const res = await fetch(
-    `${PROXY}${OUTLET_REPORT_JSON_EP}?${params.toString()}`,
-    { headers: authHeaders() }
-  );
-  if (!res.ok) {
-    let msg = 'Outlet report fetch failed';
-    try {
-      const j = await readJsonResponse(res, msg);
-      msg = j.message || msg;
-    } catch {}
-    throw new Error(msg);
-  }
-  return readJsonResponse(res, 'Outlet report fetch failed');
+const _outletReportPromises = new Map();
+function fetchOutletReportJson(from, to, ut = 1) {
+  const key = `${from}_${to}_${ut}`;
+  if (_outletReportPromises.has(key)) return _outletReportPromises.get(key);
+
+  const promise = (async () => {
+    const params = new URLSearchParams({
+      range: `${from},${to}`,
+      ut: String(ut)
+    });
+    const res = await fetch(
+      `${PROXY}${OUTLET_REPORT_JSON_EP}?${params.toString()}`,
+      { headers: authHeaders() }
+    );
+    if (!res.ok) {
+      let msg = 'Outlet report fetch failed';
+      try {
+        const j = await readJsonResponse(res, msg);
+        msg = j.message || msg;
+      } catch { }
+      throw new Error(msg);
+    }
+    return await readJsonResponse(res, 'Outlet report fetch failed');
+  })();
+
+  _outletReportPromises.set(key, promise);
+  return promise;
 }
 
 async function fetchOrderSummaryJson(from, to, territoryId = 1) {
@@ -165,7 +218,7 @@ async function fetchOrderSummaryJson(from, to, territoryId = 1) {
     try {
       const j = await readJsonResponse(res, msg);
       msg = j.message || msg;
-    } catch {}
+    } catch { }
     throw new Error(msg);
   }
   return readJsonResponse(res, 'Order summary fetch failed');
@@ -185,7 +238,7 @@ async function fetchDeliverySummaryJson(from, to, territoryId = 1) {
     try {
       const j = await readJsonResponse(res, msg);
       msg = j.message || msg;
-    } catch {}
+    } catch { }
     throw new Error(msg);
   }
   return readJsonResponse(res, 'Delivery summary fetch failed');
@@ -205,7 +258,7 @@ async function fetchTargetAchievementJson(month, territoryId = 1) {
     try {
       const j = await readJsonResponse(res, msg);
       msg = j.message || msg;
-    } catch {}
+    } catch { }
     throw new Error(msg);
   }
   return readJsonResponse(res, 'Target achievement fetch failed');
@@ -226,13 +279,16 @@ async function fetchCheckinReportJson(from, to, territoryId = 1, roles = '') {
     try {
       const j = await readJsonResponse(res, msg);
       msg = j.message || msg;
-    } catch {}
+    } catch { }
     throw new Error(msg);
   }
   return readJsonResponse(res, 'Check-in report fetch failed');
 }
 
+let _cachedTerritoriesJson = null;
 async function fetchTerritoriesJson() {
+  if (_cachedTerritoriesJson) return _cachedTerritoriesJson;
+
   const res = await fetch(
     `${PROXY}${TERRITORIES_JSON_EP}`,
     { headers: authHeaders() }
@@ -242,13 +298,18 @@ async function fetchTerritoriesJson() {
     try {
       const j = await readJsonResponse(res, msg);
       msg = j.message || msg;
-    } catch {}
+    } catch { }
     throw new Error(msg);
   }
-  return readJsonResponse(res, 'Territories fetch failed');
+  const data = await readJsonResponse(res, 'Territories fetch failed');
+  _cachedTerritoriesJson = data;
+  return data;
 }
 
+let _cachedUserBulkJson = null;
 async function fetchUserBulkJson() {
+  if (_cachedUserBulkJson) return _cachedUserBulkJson;
+
   try {
     const res = await fetch(
       `${PROXY}${USER_BULK_JSON_EP}`,
@@ -259,10 +320,12 @@ async function fetchUserBulkJson() {
       try {
         const j = await readJsonResponse(res, msg);
         msg = j.message || msg;
-      } catch {}
+      } catch { }
       throw new Error(msg);
     }
-    return readJsonResponse(res, 'User bulk fetch failed');
+    const data = await readJsonResponse(res, 'User bulk fetch failed');
+    _cachedUserBulkJson = data;
+    return data;
   } catch (err) {
     console.warn('User bulk JSON route unavailable, falling back to workbook fetch:', err);
     const workbookRes = await fetch(
@@ -298,27 +361,27 @@ function normalizeOutletRows(json) {
   const rows = Array.isArray(json?.data)
     ? json.data
     : Array.isArray(json)
-    ? json
-    : [];
-  
+      ? json
+      : [];
+
   console.log('normalizeOutletRows received:', json);
   console.log('Raw rows count:', rows.length);
-  
+
   if (rows.length > 0) {
     console.log('First row sample:', rows[0]);
     console.log('Row keys:', Object.keys(rows[0]));
   }
-  
+
   return rows.map(row => {
     // Try multiple field name variations
-    const supplierCode = row['Supplier Code'] 
+    const supplierCode = row['Supplier Code']
       || row['supplier code']
-      || row.supplier_code 
+      || row.supplier_code
       || row.supplierCode
       || row.SUPPLIER_CODE
       || row['SUPPLIER CODE']
       || 'Unknown';
-    
+
     return {
       supplierCode: String(supplierCode).trim(),
       supplierName: row['Supplier Name'] || row['supplier name'] || row.supplier_name || row.supplierName || null,
@@ -333,21 +396,21 @@ function normalizeOutletRows(json) {
 
 function buildSupplierVisitMix(totalVisits, rows) {
   console.log('buildSupplierVisitMix input - totalVisits:', totalVisits, 'rows count:', rows.length);
-  
+
   if (!rows || rows.length === 0) {
     console.warn('No rows provided to buildSupplierVisitMix');
     return [];
   }
-  
+
   const counts = new Map();
-  
+
   rows.forEach(r => {
     const key = (r.supplierCode || 'Unknown').toString().trim();
     counts.set(key, (counts.get(key) || 0) + 1);
   });
-  
+
   console.log('Supplier code groups:', counts);
-  
+
   const totalRows = rows.length || 1;
   const grouped = [...counts.entries()]
     .map(([label, count]) => {
@@ -360,18 +423,18 @@ function buildSupplierVisitMix(totalVisits, rows) {
       };
     })
     .sort((a, b) => b.value - a.value);
-  
+
   console.log('Grouped supplier mix:', grouped);
-  
+
   if (totalVisits > 0) {
     const rawSum = grouped.reduce((sum, item) => sum + item.value, 0);
     const delta = Number(totalVisits || 0) - rawSum;
-    
+
     if (grouped.length && Math.abs(delta) > 0.001) {
       grouped[0].value = Number((grouped[0].value + delta).toFixed(2));
     }
   }
-  
+
   return grouped;
 }
 
@@ -379,17 +442,17 @@ function buildVisitedDealerSummary(visitedCount, outletRows, visitedOutletRows =
   const fallbackVisited = Number(visitedCount || 0);
   const visited = Array.isArray(visitedOutletRows) && visitedOutletRows.length
     ? new Set(
-        visitedOutletRows
-          .map((row) => String(row.outletCode || '').trim())
-          .filter(Boolean)
-      ).size
+      visitedOutletRows
+        .map((row) => String(row.outletCode || '').trim())
+        .filter(Boolean)
+    ).size
     : fallbackVisited;
   const totalDealer = Array.isArray(outletRows)
     ? new Set(
-        outletRows
-          .map((row) => String(row.outletCode || '').trim())
-          .filter(Boolean)
-      ).size || outletRows.length
+      outletRows
+        .map((row) => String(row.outletCode || '').trim())
+        .filter(Boolean)
+    ).size || outletRows.length
     : 0;
   const notVisited = Math.max(totalDealer - visited, 0);
 
@@ -711,6 +774,7 @@ function filterOutletRowsByTerritory(outletRows, slicers) {
 
 function buildDmTerritoryVisitSummary(checkinRows, orderRows, territoryRows, slicers) {
   const orderTerritoryMap = getOrderTerritoryMap(orderRows, territoryRows);
+  const territoryByCode = new Map(territoryRows.map((row) => [String(row.code || '').trim(), row]));
   const territoryByRm = new Map();
   territoryRows.forEach((row) => {
     const rmKey = String(row.rmTerritory || '').trim();
@@ -718,8 +782,8 @@ function buildDmTerritoryVisitSummary(checkinRows, orderRows, territoryRows, sli
       territoryByRm.set(rmKey, row);
     }
   });
+
   const bucketMap = new Map();
-  let joinCount = 0;
 
   checkinRows.forEach((row) => {
     const employeeKey = String(row.employeeCode || '').trim();
@@ -728,33 +792,51 @@ function buildDmTerritoryVisitSummary(checkinRows, orderRows, territoryRows, sli
     const territory = join?.territory || fallbackTerritory;
     if (!territory || !matchesTerritorySlicer(territory, slicers)) return;
 
-    joinCount += 1;
     const dmKey = territory.dmTerritory || 'Unknown';
     if (!bucketMap.has(dmKey)) {
-      bucketMap.set(dmKey, { dmTerritory: dmKey, totalSet: new Set(), productiveSet: new Set() });
+      bucketMap.set(dmKey, { dmTerritory: dmKey, totalVisitCount: 0, productiveSet: new Set(), totalQty: 0, totalOrdered: 0 });
+    }
+
+    const departmentKey = String(row.departmentCode || '').trim();
+    if (departmentKey) {
+      bucketMap.get(dmKey).totalVisitCount += 1;
+    }
+  });
+
+  orderRows.forEach((row) => {
+    const territoryCode = String(row.buyerTerritoryCode || '').trim();
+    const territory =
+      territoryByCode.get(territoryCode) ||
+      territoryByCode.get(String(row.tmArea || '').trim()) ||
+      territoryByRm.get(String(row.rmTerritory || '').trim());
+
+    if (!territory || !matchesTerritorySlicer(territory, slicers)) return;
+
+    const dmKey = territory.dmTerritory || 'Unknown';
+    if (!bucketMap.has(dmKey)) {
+      bucketMap.set(dmKey, { dmTerritory: dmKey, totalVisitCount: 0, productiveSet: new Set(), totalQty: 0, totalOrdered: 0 });
     }
 
     const bucket = bucketMap.get(dmKey);
-    const departmentKey = String(row.departmentCode || '').trim();
-    if (!departmentKey) return;
-
-    bucket.totalSet.add(departmentKey);
-    if (Number(join?.amount || 0) > 0) {
-      bucket.productiveSet.add(departmentKey);
+    if (row.trackingId) {
+      bucket.productiveSet.add(row.trackingId);
     }
+    bucket.totalQty += Number(row.quantity || 0);
+    bucket.totalOrdered += Number(row.amount || 0);
   });
 
   const summary = [...bucketMap.values()]
     .map((item) => ({
       dmTerritory: item.dmTerritory,
-      totalVisit: item.totalSet.size,
-      productiveVisit: item.productiveSet.size
+      totalVisit: item.totalVisitCount,
+      productiveVisit: item.productiveSet.size,
+      totalQty: item.totalQty,
+      totalOrdered: item.totalOrdered
     }))
     .sort((a, b) => b.totalVisit - a.totalVisit);
 
   console.log('First normalized order row:', orderRows[0] || null);
   console.log('First normalized territory row:', territoryRows[0] || null);
-  console.log('Join results count:', joinCount);
   console.log('Grouped DM Territory summary:', summary);
   console.log('Slicer-selected values:', slicers);
 
@@ -764,18 +846,18 @@ function buildDmTerritoryVisitSummary(checkinRows, orderRows, territoryRows, sli
 function buildVisitCoverageSummary(checkinRows, outletRows) {
   const totalDealer = Array.isArray(outletRows)
     ? new Set(
-        outletRows
-          .map((row) => String(row.outletCode || '').trim())
-          .filter(Boolean)
-      ).size || outletRows.length
+      outletRows
+        .map((row) => String(row.outletCode || '').trim())
+        .filter(Boolean)
+    ).size || outletRows.length
     : 0;
 
   const visited = Array.isArray(checkinRows)
     ? new Set(
-        checkinRows
-          .map((row) => String(row.departmentCode || '').trim())
-          .filter(Boolean)
-      ).size
+      checkinRows
+        .map((row) => String(row.departmentCode || '').trim())
+        .filter(Boolean)
+    ).size
     : 0;
 
   const summary = {
@@ -867,8 +949,8 @@ function unwrapExportRows(payload) {
   return Array.isArray(payload?.data)
     ? payload.data
     : Array.isArray(payload)
-    ? payload
-    : [];
+      ? payload
+      : [];
 }
 
 function remapWorksheetRows(rawRows, headerHints = []) {
@@ -1005,6 +1087,9 @@ function normalizeOrderRows(rows) {
       buyerDepartmentName: String(
         pickRowValue(row, ['Buyer Department Name', 'buyer department name', 'BuyerDepartmentName', 'buyerDepartmentName']) || ''
       ).trim() || null,
+      sellerDepartmentCode: String(
+        pickRowValue(row, ['Seller Department Code', 'seller department code', 'SellerDepartmentCode', 'sellerDepartmentCode']) || ''
+      ).trim() || null,
       buyerTerritoryCode: String(pickRowValue(row, ['Buyer Territory Code', 'buyer territory code', 'BuyerTerritoryCode', 'buyerTerritoryCode']) || '').trim() || null,
       buyerTerritoryName,
       rmTerritory: parsedTerritory.rmTerritory,
@@ -1013,6 +1098,8 @@ function normalizeOrderRows(rows) {
       date: normalizeDateLabel(pickRowValue(row, ['Order Date', 'order date', 'Date', 'date', 'Created At', 'created_at', 'Order Created Date'])),
       brand: String(pickRowValue(row, ['Product Brand', 'Brand', 'product_brand', 'brand', 'ProductBrand']) || 'Unknown').trim(),
       category: String(pickRowValue(row, ['Product Category', 'Category', 'product_category', 'category', 'ProductCategory']) || 'Unknown').trim(),
+      trackingId: String(pickRowValue(row, [' Tracking ID', 'Tracking ID', 'tracking_id', 'tracking id', 'TrackingID']) || '').trim() || null,
+      quantity: Number(pickRowValue(row, ['Order Quantity', 'order quantity', 'Quantity', 'quantity']) || 0),
       amount: normalizeAmountValue(pickRowValue(row, ['Amount', 'Subtotal', 'Total Amount', 'Order Amount', 'Net Amount', 'amount', 'subtotal', 'total_amount']))
     };
   }).filter((row) => row.amount > 0);
@@ -1119,10 +1206,10 @@ function mergeOrderedDelivered(orderedRows, deliveredRows) {
 function calculateFilteredKpis(originalData, orderRows, deliveryRows, outletRows, slicers) {
   // Calculate filtered amounts from order summary
   const filteredOrderAmount = orderRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
-  
+
   // Calculate filtered amounts from delivery summary
   const filteredDeliveredAmount = deliveryRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
-  
+
   // Count unique employee codes from filtered order rows (proxy for unique outlets visited in selected territory)
   const uniqueEmployeeCodes = new Set();
   orderRows.forEach((row) => {
@@ -1130,21 +1217,36 @@ function calculateFilteredKpis(originalData, orderRows, deliveryRows, outletRows
     if (code) uniqueEmployeeCodes.add(code);
   });
   const filteredOutletsVisited = Math.max(uniqueEmployeeCodes.size, outletRows.length || 1);
-  
-  // Calculate payment amounts based on the ratio of filtered delivery to total delivery
-  // This is a reasonable approximation since payments scale with delivery
-  const deliveryRatio = originalData.deliveredAmount > 0 
-    ? filteredDeliveredAmount / originalData.deliveredAmount 
-    : 0;
-  
-  const filteredPaymentTotal = Math.round(Number(originalData.paymentTotal || 0) * deliveryRatio);
-  const filteredPaymentAccepted = Math.round(Number(originalData.paymentAccepted || 0) * deliveryRatio);
-  const filteredPaymentPending = Math.round(Number(originalData.paymentPending || 0) * deliveryRatio);
-  const filteredPaymentRejected = Math.round(Number(originalData.paymentRejected || 0) * deliveryRatio);
-  
+
+  // Check if any territory filter or supplier filter is actually active
+  const isTerrFiltered = slicers && (slicers.dmTerritory !== 'All' || slicers.rmTerritory !== 'All' || slicers.tmArea !== 'All');
+  const isSupplierFiltered = typeof window !== 'undefined' && !!window.selectedSupplier;
+  const isFiltered = isTerrFiltered || isSupplierFiltered;
+
+  let filteredPaymentTotal, filteredPaymentAccepted, filteredPaymentPending, filteredPaymentRejected;
+
+  if (isFiltered) {
+    // When territory filtering is active, approximate payment values based on
+    // the ratio of filtered order amount to total order amount
+    const orderRatio = originalData.orderAmount > 0
+      ? filteredOrderAmount / originalData.orderAmount
+      : 0;
+
+    filteredPaymentTotal = Math.round(Number(originalData.paymentTotal || 0) * orderRatio);
+    filteredPaymentAccepted = Math.round(Number(originalData.paymentAccepted || 0) * orderRatio);
+    filteredPaymentPending = Math.round(Number(originalData.paymentPending || 0) * orderRatio);
+    filteredPaymentRejected = Math.round(Number(originalData.paymentRejected || 0) * orderRatio);
+  } else {
+    // No territory filter active — use the exact API values directly
+    filteredPaymentTotal = Number(originalData.paymentTotal || 0);
+    filteredPaymentAccepted = Number(originalData.paymentAccepted || 0);
+    filteredPaymentPending = Number(originalData.paymentPending || 0);
+    filteredPaymentRejected = Number(originalData.paymentRejected || 0);
+  }
+
   // Count actual orders from filtered order rows
   const filteredOrdersCreated = orderRows.length;
-  
+
   return {
     ordersCreated: filteredOrdersCreated,
     orderAmount: filteredOrderAmount,
@@ -1216,12 +1318,12 @@ async function fetchDashboardData(from, to) {
 // ============================================================================
 
 function fillUser() {
-  const userName = localStorage.getItem('user_name') || 
-                   sessionStorage.getItem('user_name') || 
-                   'Admin';
-  const userRole = localStorage.getItem('user_role') || 
-                   sessionStorage.getItem('user_role') || 
-                   'Member';
+  const userName = localStorage.getItem('user_name') ||
+    sessionStorage.getItem('user_name') ||
+    'Admin';
+  const userRole = localStorage.getItem('user_role') ||
+    sessionStorage.getItem('user_role') ||
+    'Member';
   const userInitial = (userName[0] || 'A').toUpperCase();
 
   document.querySelectorAll('[data-user-name]').forEach(el => {

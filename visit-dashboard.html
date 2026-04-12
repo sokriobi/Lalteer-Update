@@ -14,7 +14,7 @@
 <body>
   <div class="app-shell">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" style="display: flex; flex-direction: column;">
       <div class="brand-box">
         <img src="assets/img/logo.png" alt="Lal Teer">
         <div>
@@ -30,17 +30,24 @@
         <a class="nav-link active" href="visit-dashboard.html">
           <span class="nav-dot"></span>Visit Dashboard
         </a>
-        <a class="nav-link" href="#" data-logout>
-          <span class="nav-dot"></span>Logout
-        </a>
       </div>
-      <div class="user-card">
+      <div style="flex-grow: 1;"></div>
+      <div class="user-card" style="margin-bottom: 12px; margin-top: 20px;">
         <div class="user-avatar" data-user-avatar>A</div>
         <div>
           <div class="user-name" data-user-name>Admin</div>
           <div class="user-role" data-user-role>Member</div>
         </div>
       </div>
+      <a href="#" data-logout style="display: flex; align-items: center; justify-content: center; background: #fdfdfd; color: #df4045; text-decoration: none; padding: 12px 20px; border-radius: 99px; font-weight: 700; font-size: 19px; letter-spacing: 0.5px; gap: 12px; margin-top: 10px; border: 2px solid #efefef; box-shadow: 0px 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s ease;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M10 8H8v8h2"></path>
+          <path d="M9 12h7"></path>
+          <path d="M13 9l3 3-3 3"></path>
+        </svg>
+        Logout
+      </a>
     </aside>
 
     <!-- Main Content -->
@@ -78,12 +85,6 @@
       <section class="visit-kpi-shell">
         <section id="visitKpiGrid" class="kpi-grid"></section>
         <section class="card kpi-card visit-role-card" style="--accent:#61a7e8">
-          <div class="visit-role-head">
-            <div class="kpi-copy">
-              <div class="kpi-label">Roles</div>
-            </div>
-            <div class="kpi-icon">RU</div>
-          </div>
           <div class="card-body visit-role-card-body">
             <table class="visit-role-table">
               <thead>
@@ -135,15 +136,37 @@
 
       <section class="single-chart-section">
         <div class="card">
-          <div class="card-header">
+          <div class="card-header" style="display: flex; justify-content: space-between; align-items: flex-start;">
             <div>
               <h3>DM Territory Visit vs Productive</h3>
               <p>Territory-wise total visit and productive visit comparison</p>
             </div>
+            <button id="toggleDmTableBtn" class="btn btn-outline" style="font-size: 13px; font-weight: 500; padding: 6px 14px; border-radius: 6px; cursor: pointer; color: var(--text-primary); border-color: var(--border-color); background: rgba(52, 211, 153, 0.05); transition: all 0.2s ease;">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 6px; color: var(--teal);">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                <line x1="3" y1="9" x2="21" y2="9"></line>
+                <line x1="9" y1="21" x2="9" y2="9"></line>
+              </svg>
+              Click to view KPI table
+            </button>
           </div>
           <div class="card-body">
-            <div class="chart-wrap analysis-chart-wrap">
+            <div id="dmChartContainer" class="chart-wrap analysis-chart-wrap">
               <canvas id="dmTerritoryChart"></canvas>
+            </div>
+            <div id="dmTableContainer" class="custom-scrollbar" style="display: none; max-height: 400px; overflow-y: auto; overflow-x: auto; margin-top: 15px;">
+              <table style="width: 100%; text-align: left; border-collapse: separate; border-spacing: 0; font-size: 14px;">
+                <thead style="position: sticky; top: 0; background: #ffffff; z-index: 10;">
+                  <tr>
+                    <th style="padding: 14px 16px; border-bottom: 2px solid var(--border-color); color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px;">DM Territory</th>
+                    <th style="padding: 14px 16px; border-bottom: 2px solid var(--border-color); color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px;">Total Visit</th>
+                    <th style="padding: 14px 16px; border-bottom: 2px solid var(--border-color); color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px;">Productive</th>
+                    <th style="padding: 14px 16px; border-bottom: 2px solid var(--border-color); color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px;">Total Qty</th>
+                    <th style="padding: 14px 16px; border-bottom: 2px solid var(--border-color); color: var(--text-muted); font-weight: 600; text-transform: uppercase; font-size: 12px; letter-spacing: 0.5px;">Total Ordered</th>
+                  </tr>
+                </thead>
+                <tbody id="dmTerritoryTbody"></tbody>
+              </table>
             </div>
           </div>
         </div>

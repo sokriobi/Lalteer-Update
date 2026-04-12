@@ -11,6 +11,8 @@ let territoryMasterRows = [];
 const orderBreakdownCache = new Map();
 let activeOrderBreakdownRequestKey = '';
 let orderBreakdownOutsideClickBound = false;
+let latestReadyToDispatchAmount = 0;
+let latestOnTheWayAmount = 0;
 
 const ORDER_BREAKDOWN_STATUSES = [
   { key: 'accepted', label: 'Accepted' },
@@ -213,7 +215,7 @@ function renderKpis(d) {
     ['Delivery Rate', fmtPct(d.deliveryRate), colors.green],
     ['Accepted Rate', fmtPct(d.acceptedRate), colors.green],
     ['Pending Rate', fmtPct(d.pendingRate), colors.orange],
-    ['Coverage', fmtPct(d.paymentCoverage), colors.blue],
+    ['Rejected Rate', fmtPct(d.rejectedRate || (d.paymentTotal ? d.paymentRejected / d.paymentTotal : 0)), colors.red],
     ['Delivery Gap', fmtCurrency(d.deliveryGap), colors.red],
     ['Unpaid Balance', fmtCurrency(d.unpaidBalance), colors.purple]
   ]
@@ -230,15 +232,20 @@ function getOrderBreakdownCacheKey(from, to) {
   return `${from || ''}_${to || ''}`;
 }
 
-function renderAmountBreakdownRows(summary) {
+function renderAmountBreakdownRows(summary, extraData) {
   if (!summary) return '';
+
+  const readyToDispatchAmount = Number(extraData?.readyToDispatchAmount || 0);
+  const onTheWayAmount = Number(extraData?.onTheWayAmount || 0);
 
   return [
     ['Delivered Amount', fmtCurrency(summary.deliveredAmount)],
     ['Total Payment', fmtCurrency(summary.paymentTotal)],
     ['Accepted Payment', fmtCurrency(summary.paymentAccepted)],
     ['Pending Payment', fmtCurrency(summary.paymentPending)],
-    ['Rejected Payment', fmtCurrency(summary.paymentRejected)]
+    ['Rejected Payment', fmtCurrency(summary.paymentRejected)],
+    ['Ready to Dispatch', fmtCurrency(readyToDispatchAmount)],
+    ['On the Way', fmtCurrency(onTheWayAmount)]
   ].map(([label, value]) => `
     <div class="breakdown-row">
       <span class="breakdown-status">${label}</span>
@@ -277,6 +284,12 @@ function buildOutletSupplierLookup(rows) {
 function enrichRowsWithSupplier(rows, options = {}) {
   const { outletLookup, rowOutletCodeSelector } = options;
   return (rows || []).map((row) => {
+    // Prefer direct Seller Department Code from the export row itself
+    const directSupplier = row?.sellerDepartmentCode;
+    if (directSupplier && directSupplier !== 'Unknown') {
+      return { ...row, supplierCode: directSupplier };
+    }
+    // Fall back to outlet lookup
     const outletCode = String(rowOutletCodeSelector(row) || '').trim();
     const supplierCode = outletLookup.get(outletCode) || row?.supplierCode || 'Unknown';
     return {
@@ -717,6 +730,122 @@ async function fetchOrderStatusBreakdown(fromDate, toDate) {
   return breakdown;
 }
 
+// ============================================================================
+// Ready to Dispatch Invoice Fetching
+// ============================================================================
+
+async function fetchInvoicesByStatus(fromDate, toDate, latestStatus, label) {
+  const PER_PAGE = 500;
+  const tag = `[INV:${label}]`;
+
+  const fetchPage = async (page) => {
+    const params = new URLSearchParams({
+      created_between: `${fromDate},${toDate}`,
+      latest_status: latestStatus,
+      order_type: 'secondary',
+      page: String(page),
+      per_page: String(PER_PAGE)
+    });
+
+    const response = await fetch(`${PROXY}/api/v3/invoices?${params.toString()}`, {
+      headers: authHeaders()
+    });
+
+    if (!response.ok) {
+      let message = `${label} invoice fetch failed`;
+      try {
+        const payload = await readJsonResponse(response, message);
+        message = payload?.message || payload?.error || message;
+      } catch {}
+      throw new Error(message);
+    }
+
+    return readJsonResponse(response, `${label} invoice fetch failed`);
+  };
+
+  const firstPayload = await fetchPage(1);
+
+  // Extract rows: try nested data.data first (Laravel paginated), then direct data
+  let firstRows;
+  if (firstPayload?.data && typeof firstPayload.data === 'object' && !Array.isArray(firstPayload.data) && Array.isArray(firstPayload.data?.data)) {
+    firstRows = firstPayload.data.data;
+  } else {
+    firstRows = findBreakdownRows(firstPayload) || [];
+  }
+
+  // Determine last page
+  const lastPage = Number(
+    firstPayload?.last_page
+    ?? firstPayload?.meta?.last_page
+    ?? firstPayload?.meta?.lastPage
+    ?? firstPayload?.pagination?.last_page
+    ?? firstPayload?.pagination?.lastPage
+    ?? firstPayload?.data?.last_page
+    ?? firstPayload?.data?.lastPage
+    ?? 1
+  );
+
+  if (!Number.isFinite(lastPage) || lastPage <= 1) {
+    console.log(`${tag} rows: ${firstRows.length} (1 page)`);
+    return firstRows;
+  }
+
+  const remainingPageNumbers = Array.from({ length: lastPage - 1 }, (_, index) => index + 2);
+  const remainingPayloads = await Promise.all(remainingPageNumbers.map((page) => fetchPage(page)));
+  const remainingRows = remainingPayloads.flatMap((payload) => {
+    if (payload?.data && typeof payload.data === 'object' && !Array.isArray(payload.data) && Array.isArray(payload.data?.data)) {
+      return payload.data.data;
+    }
+    return findBreakdownRows(payload) || [];
+  });
+
+  const allRows = [...firstRows, ...remainingRows];
+  console.log(`${tag} rows: ${allRows.length} (${lastPage} pages)`);
+  return allRows;
+}
+
+function sumInvoicePayable(rows) {
+  if (!Array.isArray(rows) || !rows.length) return 0;
+
+  return rows.reduce((sum, row) => {
+    // The /api/v3/invoices endpoint returns the invoice total in the "payable" field
+    const rawValue = row?.payable
+      ?? row?.total
+      ?? row?.Total
+      ?? row?.amount
+      ?? row?.Amount
+      ?? row?.grand_total
+      ?? row?.grandTotal
+      ?? row?.total_amount
+      ?? row?.totalAmount;
+    return sum + normalizeAmountValue(rawValue);
+  }, 0);
+}
+
+async function fetchReadyToDispatchAmount(fromDate, toDate) {
+  try {
+    const rows = await fetchInvoicesByStatus(fromDate, toDate, 'readyToDispatch', 'Ready to Dispatch');
+    const amount = sumInvoicePayable(rows);
+    console.log('[RTD] Ready to Dispatch — rows:', rows.length, 'amount:', amount);
+    return amount;
+  } catch (err) {
+    console.error('[RTD] Ready to Dispatch fetch failed:', err);
+    return 0;
+  }
+}
+
+async function fetchOnTheWayAmount(fromDate, toDate) {
+  try {
+    const rows = await fetchInvoicesByStatus(fromDate, toDate, 'ontheway', 'On the Way');
+    const amount = sumInvoicePayable(rows);
+    console.log('[OTW] On the Way — rows:', rows.length, 'amount:', amount);
+    return amount;
+  } catch (err) {
+    console.error('[OTW] On the Way fetch failed:', err);
+    return 0;
+  }
+}
+
 function renderOrderBreakdown(data, options = {}) {
   const panel = document.getElementById('orderBreakdownPanel');
   if (!panel) return;
@@ -760,6 +889,11 @@ function renderOrderBreakdown(data, options = {}) {
     return;
   }
 
+  const extraData = {
+    readyToDispatchAmount: latestReadyToDispatchAmount,
+    onTheWayAmount: latestOnTheWayAmount
+  };
+
   panel.innerHTML = `
     <div class="breakdown-panel-header">
       <div>
@@ -770,7 +904,7 @@ function renderOrderBreakdown(data, options = {}) {
     <div class="breakdown-grid">
       <div class="breakdown-head">Metric</div>
       <div class="breakdown-head breakdown-head-amount">Amount</div>
-      ${renderAmountBreakdownRows(latestSalesSummary)}
+      ${renderAmountBreakdownRows(latestSalesSummary, extraData)}
     </div>
   `;
 }
@@ -815,8 +949,14 @@ async function toggleOrderBreakdown() {
   renderOrderBreakdown(null, { loading: true });
 
   try {
-    const data = await fetchOrderStatusBreakdown(from, to);
+    const [data, readyToDispatchAmount, onTheWayAmount] = await Promise.all([
+      fetchOrderStatusBreakdown(from, to),
+      fetchReadyToDispatchAmount(from, to),
+      fetchOnTheWayAmount(from, to)
+    ]);
     if (activeOrderBreakdownRequestKey !== cacheKey) return;
+    latestReadyToDispatchAmount = readyToDispatchAmount;
+    latestOnTheWayAmount = onTheWayAmount;
     renderOrderBreakdown(data);
   } catch (error) {
     console.error('Order breakdown fetch failed:', error);
@@ -1016,14 +1156,32 @@ function renderPaymentStatusMeta(d) {
 }
 
 function renderSupplierVisitMix(d) {
-  const totalVisit = Math.max(Math.round(Number(d.totalVisit || d.outletsVisited || 0)), 0);
-  const productive = Math.max(Math.round(Number(d.ordersCreated || 0)), 0);
-  const nonProductive = Math.max(totalVisit - productive, 0);
-  const mix = integerizeSupplierVisitMix(d.supplierVisitMix || [], totalVisit);
+  const selectedSupplier = normalizeSupplierKey(window.selectedSupplier);
+  const globalTotalVisit = Math.max(Math.round(Number(d.totalVisit || d.outletsVisited || 0)), 0);
+  const mix = integerizeSupplierVisitMix(d.supplierVisitMix || [], globalTotalVisit);
+  
+  let currentTotalVisit = globalTotalVisit;
+  if (selectedSupplier) {
+    const suppItem = mix.find(m => normalizeSupplierKey(m.label) === selectedSupplier);
+    if (suppItem) currentTotalVisit = suppItem.value;
+  }
+  
+  // Use actual order row counts from Order Summary Export (Seller Department Code)
+  let productive, nonProductive;
+  if (selectedSupplier) {
+    // Filtered order rows matching this supplier's Seller Department Code
+    productive = Math.max(Number(d.filteredOrderRowCount || 0), 0);
+    // Productive cannot logically exceed this supplier's total visits
+    productive = Math.min(productive, currentTotalVisit);
+    nonProductive = Math.max(currentTotalVisit - productive, 0);
+  } else {
+    // Global: total order rows = total productive
+    productive = Math.max(Number(d.totalOrderRowCount || d.ordersCreated || 0), 0);
+    nonProductive = Math.max(globalTotalVisit - productive, 0);
+  }
   const card = document.getElementById('supplierVisitCard');
   const breakdown = document.getElementById('supplierVisitBreakdown');
-  const selectedSupplier = normalizeSupplierKey(window.selectedSupplier);
-  renderVisitBySupplierMeta({ totalVisit, productive, nonProductive });
+  renderVisitBySupplierMeta({ totalVisit: currentTotalVisit, productive, nonProductive });
 
   if (charts.supplierVisitChart) {
     charts.supplierVisitChart.destroy();
@@ -1031,7 +1189,7 @@ function renderSupplierVisitMix(d) {
   }
 
   if (!mix.length) {
-    renderVisitBySupplierMeta({ totalVisit, productive, nonProductive });
+    renderVisitBySupplierMeta({ totalVisit: currentTotalVisit, productive, nonProductive });
     if (card) {
       card.classList.add('is-empty');
     }
@@ -1103,7 +1261,7 @@ function renderSupplierVisitMix(d) {
         }
       }
     },
-    plugins: [centerTextPlugin('Total Visit', fmtNumber(totalVisit), '#173222')]
+    plugins: [centerTextPlugin('Total Visit', fmtNumber(currentTotalVisit), '#173222')]
   });
 
   const legend = document.getElementById('supplierVisitBreakdown');
@@ -1577,16 +1735,46 @@ function renderSalesDashboard(state) {
   latestCollectionSummary = collectionSummary;
   collectionBreakdownCache.set(getOrderBreakdownCacheKey(dateFrom.value, dateTo.value), collectionSummary);
 
+  const supplierTotalVisit = selectedSupplier && selectedSupplierMix
+    ? Number(selectedSupplierMix.value || 0)
+    : state.totalVisit;
+
   const d = {
     ...filteredKpis,
     ordersCreated: displayedOrdersCreated,
     orderAmount: displayedOrderAmount,
     outletsVisited: selectedSupplier ? Number(selectedSupplierMix?.value || filteredKpis.outletsVisited || 0) : filteredKpis.outletsVisited,
-    totalVisit: state.totalVisit,
+    totalVisit: supplierTotalVisit,
     collectionTotal: collectionSummary.total,
     effectiveCoverage,
-    supplierVisitMix: state.supplierVisitMix
+    supplierVisitMix: state.supplierVisitMix,
+    // Actual order row counts for Visit by Supplier Code productive calculation
+    totalOrderRowCount: state.orderRows.length,
+    filteredOrderRowCount: orderRows.length
   };
+
+  // When no supplier filter is active, use the exact payment values from the
+  // API instead of the ratio-based approximation produced by calculateFilteredKpis.
+  // This avoids rounding/mismatch errors between export-derived totals and API totals.
+  if (!selectedSupplier) {
+    const isTerrFiltered = state.slicers &&
+      (state.slicers.dmTerritory !== 'All' || state.slicers.rmTerritory !== 'All' || state.slicers.tmArea !== 'All');
+    if (!isTerrFiltered) {
+      d.paymentTotal = Number(state.dashboardData.paymentTotal || 0);
+      d.paymentAccepted = Number(state.dashboardData.paymentAccepted || 0);
+      d.paymentPending = Number(state.dashboardData.paymentPending || 0);
+      d.paymentRejected = Number(state.dashboardData.paymentRejected || 0);
+      d.deliveredAmount = Number(state.dashboardData.deliveredAmount || 0);
+      d.acceptedRate = safeDiv(d.paymentAccepted, d.paymentTotal);
+      d.pendingRate = safeDiv(d.paymentPending, d.paymentTotal);
+      d.rejectedRate = safeDiv(d.paymentRejected, d.paymentTotal);
+      d.paymentCoverage = safeDiv(d.paymentTotal, d.orderAmount);
+      d.acceptedVsOrder = safeDiv(d.paymentAccepted, d.orderAmount);
+      d.deliveryRate = safeDiv(d.deliveredAmount, d.orderAmount);
+      d.deliveryGap = Math.max(0, d.orderAmount - d.deliveredAmount);
+      d.unpaidBalance = Math.max(0, d.paymentTotal - d.paymentAccepted);
+    }
+  }
 
   renderKpis(d);
   renderCharts(d);
@@ -1686,12 +1874,14 @@ async function load() {
   const targetMonth = String(to || from).slice(0, 7);
   const slicers = getTerritorySlicerState();
 
-  document.getElementById('lastUpdated').textContent = 'Loading…';
+  const loadStartTime = performance.now();
+  document.getElementById('lastUpdated').innerHTML = '<div style="text-align: center; font-size: 20px; color: #ffffff; font-weight: 600; margin-right: 4px;">Loading...</div>';
 
   try {
     console.log('=== Dashboard Load Started ===');
     console.log('Date range:', from, 'to', to);
     latestCollectionError = '';
+    latestReadyToDispatchAmount = 0;
     window.selectedSupplier = '';
     
     const [dashboardData, outletResult, dealerBaseOutletJson, orderSummaryJson, deliverySummaryJson, targetAchievementJson, territoriesJson, collectionRows] = await Promise.all([
@@ -1784,10 +1974,25 @@ async function load() {
     
     console.log('=== Dashboard Load Completed ===');
 
-    document.getElementById('lastUpdated').textContent = `Last updated: ${new Date().toLocaleString()}`;
+    const durationSec = ((performance.now() - loadStartTime) / 1000).toFixed(1);
+    const now = new Date();
+    const formattedDate = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); 
+    const formattedTime = now.toLocaleTimeString('en-US');
+    
+    document.getElementById('lastUpdated').innerHTML = `
+      <div style="text-align: center; font-size: 18px; font-weight: 600; color: #ffffff; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0; margin-right: 4px;">
+        <span><span style="color: rgba(255,255,255,0.7); font-weight: 500;">Last Updated:</span> ${formattedDate}, ${formattedTime}</span>
+        <span style="color: rgba(255,255,255,0.3);">|</span>
+        <span><span style="color: rgba(255,255,255,0.7); font-weight: 500;">Refreshed in:</span> ${durationSec} seconds</span>
+      </div>
+    `;
   } catch (err) {
     console.error('Error loading dashboard:', err);
-    document.getElementById('lastUpdated').textContent = `Error: ${err.message}`;
+    document.getElementById('lastUpdated').innerHTML = `
+      <div style="text-align: center; font-size: 14.5px; font-weight: 600; color: #ef4444; padding: 12px 0;">
+        Error reloading data: ${err.message}
+      </div>
+    `;
   }
 }
 

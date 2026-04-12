@@ -70,31 +70,21 @@ function sanitizeFilePart(value) {
 function saveDownloadedWorkbook({ buffer, dirPath, prefix, range, extraParts = {} }) {
   ensureDir(dirPath);
 
-  const safeRange = sanitizeFilePart(range);
-  const suffix = Object.entries(extraParts)
-    .map(([key, value]) => `${sanitizeFilePart(key)}-${sanitizeFilePart(value)}`)
-    .join('_');
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  const baseName = [prefix, safeRange, suffix, stamp].filter(Boolean).join('_');
-
-  const workbookPath = path.join(dirPath, `${baseName}.xlsx`);
+  // We only keep the latest dump to radically save disk footprint.
   const latestWorkbookPath = path.join(dirPath, `latest-${prefix}.xlsx`);
-
-  fs.writeFileSync(workbookPath, buffer);
   fs.writeFileSync(latestWorkbookPath, buffer);
 
   return {
-    workbookPath,
+    workbookPath: latestWorkbookPath,
     latestWorkbookPath,
-    baseName
+    baseName: `latest-${prefix}`
   };
 }
 
 function saveParsedJson({ dirPath, prefix, rows, range, extraMeta = {}, baseName }) {
   ensureDir(dirPath);
 
-  const jsonPath = path.join(dirPath, `${baseName}.json`);
-  const latestJsonPath = path.join(dirPath, `latest-${prefix}.json`);
+  const latestJsonPath = path.join(dirPath, `${baseName}.json`);
   const jsonPayload = {
     savedAt: new Date().toISOString(),
     range,
@@ -103,11 +93,10 @@ function saveParsedJson({ dirPath, prefix, rows, range, extraMeta = {}, baseName
     data: rows
   };
 
-  fs.writeFileSync(jsonPath, JSON.stringify(jsonPayload, null, 2));
   fs.writeFileSync(latestJsonPath, JSON.stringify(jsonPayload, null, 2));
 
   return {
-    jsonPath,
+    jsonPath: latestJsonPath,
     latestJsonPath
   };
 }

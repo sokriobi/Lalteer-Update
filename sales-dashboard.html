@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,10 +12,11 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="node_modules/xlsx/dist/xlsx.full.min.js"></script>
 </head>
+
 <body>
   <div class="app-shell">
     <!-- Sidebar -->
-    <aside class="sidebar">
+    <aside class="sidebar" style="display: flex; flex-direction: column;">
       <div class="brand-box">
         <img src="assets/img/logo.png" alt="Lal Teer">
         <div>
@@ -30,17 +32,24 @@
         <a class="nav-link" href="visit-dashboard.html">
           <span class="nav-dot"></span>Visit Dashboard
         </a>
-        <a class="nav-link" href="#" data-logout>
-          <span class="nav-dot"></span>Logout
-        </a>
       </div>
-      <div class="user-card">
+      <div style="flex-grow: 1;"></div>
+      <div class="user-card" style="margin-bottom: 12px; margin-top: 20px;">
         <div class="user-avatar" data-user-avatar>A</div>
         <div>
           <div class="user-name" data-user-name>Admin</div>
           <div class="user-role" data-user-role>Member</div>
         </div>
       </div>
+      <a href="#" data-logout style="display: flex; align-items: center; justify-content: center; background: #fdfdfd; color: #df4045; text-decoration: none; padding: 12px 20px; border-radius: 99px; font-weight: 700; font-size: 19px; letter-spacing: 0.5px; gap: 12px; margin-top: 10px; border: 2px solid #efefef; box-shadow: 0px 4px 6px rgba(0,0,0,0.1); transition: transform 0.2s ease;">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"></circle>
+          <path d="M10 8H8v8h2"></path>
+          <path d="M9 12h7"></path>
+          <path d="M13 9l3 3-3 3"></path>
+        </svg>
+        Logout
+      </a>
     </aside>
 
     <!-- Main Content -->
@@ -241,4 +250,5 @@
   <script src="assets/js/common.js?v=20260409-10"></script>
   <script src="assets/js/sales-dashboard.js?v=20260409-10"></script>
 </body>
+
 </html>
