@@ -6,6 +6,56 @@ authGuard();
 
 let charts = {};
 Chart.defaults.color = '#000';
+
+// ============================================================================
+// Frosted Glass Custom Tooltip for Chart.js
+// ============================================================================
+const getOrCreateTooltip = (chart) => {
+  let tooltipEl = chart.canvas.parentNode.querySelector('.chartjs-tooltip');
+  if (!tooltipEl) {
+    tooltipEl = document.createElement('div');
+    tooltipEl.classList.add('chartjs-tooltip');
+    tooltipEl.style.position = 'absolute';
+    tooltipEl.style.pointerEvents = 'none';
+    tooltipEl.style.transition = 'all 0.15s ease';
+    chart.canvas.parentNode.appendChild(tooltipEl);
+  }
+  return tooltipEl;
+};
+
+Chart.defaults.plugins.tooltip.enabled = false;
+Chart.defaults.plugins.tooltip.external = function (context) {
+  const { chart, tooltip } = context;
+  const tooltipEl = getOrCreateTooltip(chart);
+
+  if (tooltip.opacity === 0) {
+    tooltipEl.style.opacity = '0';
+    return;
+  }
+
+  if (tooltip.body) {
+    const titleLines = tooltip.title || [];
+    const bodyLines = tooltip.body.map(b => b.lines);
+    let html = '';
+    titleLines.forEach(t => {
+      html += `<div style="font-size:12px;font-weight:800;color:rgba(255,255,255,0.7);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em">${t}</div>`;
+    });
+    bodyLines.forEach((body, i) => {
+      const colors = tooltip.labelColors[i];
+      const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${colors.backgroundColor};margin-right:6px"></span>`;
+      body.forEach(line => {
+        html += `<div style="display:flex;align-items:center;font-size:13px;font-weight:600;color:#f5fbf6">${dot}${line}</div>`;
+      });
+    });
+    tooltipEl.innerHTML = html;
+  }
+
+  const { offsetLeft: posX, offsetTop: posY } = chart.canvas;
+  tooltipEl.style.opacity = '1';
+  tooltipEl.style.left = posX + tooltip.caretX + 'px';
+  tooltipEl.style.top = posY + tooltip.caretY + 'px';
+  tooltipEl.style.transform = 'translate(-50%, -110%)';
+};
 const SALES_DEFAULT_FROM = '2018-08-01';
 let territoryMasterRows = [];
 const orderBreakdownCache = new Map();
@@ -380,7 +430,7 @@ async function fetchPaymentsForCollection(fromDate, toDate, { parentId = null, t
     try {
       const payload = await readJsonResponse(res, message);
       message = payload?.message || payload?.error || message;
-    } catch {}
+    } catch { }
     throw new Error(message);
   }
 
@@ -684,7 +734,7 @@ async function fetchOrdersForBreakdown(fromDate, toDate) {
       try {
         const payload = await readJsonResponse(response, message);
         message = payload?.message || payload?.error || message;
-      } catch {}
+      } catch { }
       throw new Error(message);
     }
 
@@ -756,7 +806,7 @@ async function fetchInvoicesByStatus(fromDate, toDate, latestStatus, label) {
       try {
         const payload = await readJsonResponse(response, message);
         message = payload?.message || payload?.error || message;
-      } catch {}
+      } catch { }
       throw new Error(message);
     }
 
@@ -1159,13 +1209,13 @@ function renderSupplierVisitMix(d) {
   const selectedSupplier = normalizeSupplierKey(window.selectedSupplier);
   const globalTotalVisit = Math.max(Math.round(Number(d.totalVisit || d.outletsVisited || 0)), 0);
   const mix = integerizeSupplierVisitMix(d.supplierVisitMix || [], globalTotalVisit);
-  
+
   let currentTotalVisit = globalTotalVisit;
   if (selectedSupplier) {
     const suppItem = mix.find(m => normalizeSupplierKey(m.label) === selectedSupplier);
     if (suppItem) currentTotalVisit = suppItem.value;
   }
-  
+
   // Use actual order row counts from Order Summary Export (Seller Department Code)
   let productive, nonProductive;
   if (selectedSupplier) {
@@ -1706,29 +1756,63 @@ function buildSalesExportAnalysisFromRows(orderRows, deliveryRows) {
 function renderSalesDashboard(state) {
   if (!state) return;
 
+  const isTerrFiltered = state.slicers && (state.slicers.dmTerritory !== 'All' || state.slicers.rmTerritory !== 'All' || state.slicers.tmArea !== 'All');
+  const tRows = state.territoryMasterRows || territoryMasterRows || [];
+
+  // Apply territory filters to base data
+  let baseOrderRows = isTerrFiltered ? filterOrderRowsByTerritory(state.orderRows, tRows, state.slicers) : state.orderRows;
+  let baseDeliveryRows = isTerrFiltered ? filterOrderRowsByTerritory(state.deliveryRows, tRows, state.slicers) : state.deliveryRows;
+  let baseOutletRows = isTerrFiltered ? filterOutletRowsByTerritory(state.outletRows, state.slicers) : state.outletRows;
+  let baseCollectionRows = isTerrFiltered ? filterOrderRowsByTerritory(state.collectionRows, tRows, state.slicers) : state.collectionRows;
+
   const selectedSupplier = normalizeSupplierKey(window.selectedSupplier);
   const outletRows = selectedSupplier
-    ? state.outletRows.filter((row) => normalizeSupplierKey(row.supplierCode) === selectedSupplier)
-    : state.outletRows;
+    ? baseOutletRows.filter((row) => normalizeSupplierKey(row.supplierCode) === selectedSupplier)
+    : baseOutletRows;
   const orderRows = selectedSupplier
-    ? state.orderRows.filter((row) => normalizeSupplierKey(row.supplierCode) === selectedSupplier)
-    : state.orderRows;
+    ? baseOrderRows.filter((row) => normalizeSupplierKey(row.supplierCode) === selectedSupplier)
+    : baseOrderRows;
   const deliveryRows = selectedSupplier
-    ? state.deliveryRows.filter((row) => normalizeSupplierKey(row.supplierCode) === selectedSupplier)
-    : state.deliveryRows;
+    ? baseDeliveryRows.filter((row) => normalizeSupplierKey(row.supplierCode) === selectedSupplier)
+    : baseDeliveryRows;
   const collectionRows = selectedSupplier
-    ? state.collectionRows.filter((row) => normalizeSupplierKey(row.supplierCode) === selectedSupplier)
-    : state.collectionRows;
+    ? baseCollectionRows.filter((row) => normalizeSupplierKey(row.supplierCode) === selectedSupplier)
+    : baseCollectionRows;
 
   const filteredKpis = calculateFilteredKpis(state.dashboardData, orderRows, deliveryRows, outletRows, state.slicers);
+
+  if (isTerrFiltered && state.rawCheckinRows && Array.isArray(state.rawCheckinRows) && state.rawCheckinRows.length > 0) {
+    const territoryCheckins = typeof filterCheckinRowsByTerritory === 'function' && tRows.length ? filterCheckinRowsByTerritory(state.rawCheckinRows, tRows, state.slicers) : state.rawCheckinRows;
+    const uniqueVisitedOutlets = new Set();
+    territoryCheckins.forEach(row => {
+      const code = row.departmentCode || row.outletCode;
+      if (code && code !== 'Unknown') uniqueVisitedOutlets.add(code);
+    });
+    if (uniqueVisitedOutlets.size > 0) {
+      filteredKpis.outletsVisited = uniqueVisitedOutlets.size;
+    }
+  }
+
   const collectionSummary = buildCollectionSummary(collectionRows);
+
+  let activeDealerBase = isTerrFiltered && state.dealerBaseOutletRows
+    ? filterOutletRowsByTerritory(state.dealerBaseOutletRows, state.slicers)
+    : (state.dealerBaseOutletRows || state.outletRows);
+
   const dealerCount = selectedSupplier
-    ? resolveSupplierDealerCount(state.dealerBaseOutletRows, window.selectedSupplier)
-    : state.dealerCount;
-  const displayedOrdersCreated = selectedSupplier ? filteredKpis.ordersCreated : state.dashboardData.ordersCreated;
-  const displayedOrderAmount = selectedSupplier ? filteredKpis.orderAmount : state.dashboardData.orderAmount;
+    ? resolveSupplierDealerCount(activeDealerBase, window.selectedSupplier)
+    : (isTerrFiltered ? activeDealerBase.length : state.dealerCount);
+
+  const isFiltered = selectedSupplier || isTerrFiltered;
+  const displayedOrdersCreated = isFiltered ? filteredKpis.ordersCreated : state.dashboardData.ordersCreated;
+  const displayedOrderAmount = isFiltered ? filteredKpis.orderAmount : state.dashboardData.orderAmount;
+
+  const recalculatedVisitMix = isTerrFiltered && typeof buildSupplierVisitMix === 'function'
+    ? buildSupplierVisitMix(filteredKpis.outletsVisited, baseOutletRows).slice(0, 5)
+    : state.supplierVisitMix;
+
   const selectedSupplierMix = selectedSupplier
-    ? state.supplierVisitMix.find((item) => normalizeSupplierKey(item.label) === selectedSupplier)
+    ? recalculatedVisitMix.find((item) => normalizeSupplierKey(item.label) === selectedSupplier)
     : null;
   const effectiveCoverage = buildEffectiveCoverage(displayedOrdersCreated, dealerCount);
 
@@ -1737,7 +1821,7 @@ function renderSalesDashboard(state) {
 
   const supplierTotalVisit = selectedSupplier && selectedSupplierMix
     ? Number(selectedSupplierMix.value || 0)
-    : state.totalVisit;
+    : isTerrFiltered ? filteredKpis.outletsVisited : state.totalVisit;
 
   const d = {
     ...filteredKpis,
@@ -1747,18 +1831,16 @@ function renderSalesDashboard(state) {
     totalVisit: supplierTotalVisit,
     collectionTotal: collectionSummary.total,
     effectiveCoverage,
-    supplierVisitMix: state.supplierVisitMix,
-    // Actual order row counts for Visit by Supplier Code productive calculation
-    totalOrderRowCount: state.orderRows.length,
-    filteredOrderRowCount: orderRows.length
+    supplierVisitMix: recalculatedVisitMix,
+    // Actual order row counts for Visit by Supplier Code productive calculation (Distinct Tracking ID)
+    totalOrderRowCount: new Set(baseOrderRows.map(r => r.trackingId).filter(Boolean)).size,
+    filteredOrderRowCount: new Set(orderRows.map(r => r.trackingId).filter(Boolean)).size
   };
 
   // When no supplier filter is active, use the exact payment values from the
   // API instead of the ratio-based approximation produced by calculateFilteredKpis.
   // This avoids rounding/mismatch errors between export-derived totals and API totals.
   if (!selectedSupplier) {
-    const isTerrFiltered = state.slicers &&
-      (state.slicers.dmTerritory !== 'All' || state.slicers.rmTerritory !== 'All' || state.slicers.tmArea !== 'All');
     if (!isTerrFiltered) {
       d.paymentTotal = Number(state.dashboardData.paymentTotal || 0);
       d.paymentAccepted = Number(state.dashboardData.paymentAccepted || 0);
@@ -1776,9 +1858,22 @@ function renderSalesDashboard(state) {
     }
   }
 
+  // Scale MTD Target values for the territory based on order amount ratio (if targets lack territory data)
+  let scaledTargetSummary = state.targetSummary;
+  if (isTerrFiltered && state.targetSummary && state.dashboardData.orderAmount > 0) {
+    const orderRatio = filteredKpis.orderAmount / state.dashboardData.orderAmount;
+    scaledTargetSummary = {
+      target: Number((state.targetSummary.target * orderRatio).toFixed(2)),
+      ach: Number((state.targetSummary.ach * orderRatio).toFixed(2)),
+      remain: Number((state.targetSummary.remain * orderRatio).toFixed(2)),
+      achPct: state.targetSummary.achPct,
+      remainPct: state.targetSummary.remainPct
+    };
+  }
+
   renderKpis(d);
   renderCharts(d);
-  renderTargetAchievement(state.targetSummary);
+  renderTargetAchievement(scaledTargetSummary);
   renderSalesExportCharts(buildSalesExportAnalysisFromRows(orderRows, deliveryRows));
   renderInsights(d);
 }
@@ -1875,7 +1970,13 @@ async function load() {
   const slicers = getTerritorySlicerState();
 
   const loadStartTime = performance.now();
-  document.getElementById('lastUpdated').innerHTML = '<div style="text-align: center; font-size: 20px; color: #ffffff; font-weight: 600; margin-right: 4px;">Loading...</div>';
+  document.getElementById('lastUpdated').innerHTML = '<div style="text-align: right; width: 100%; font-size: 14px; color: #ffffff; font-weight: 600; padding: 4px 0;"><span class="live-pulse"></span> Loading Dashboard...</div>';
+
+  // Skeleton loaders
+  document.getElementById('kpiGrid').innerHTML = Array(4).fill('<div class="card skeleton-shimmer skeleton-kpi"></div>').join('');
+  document.getElementById('miniGrid').innerHTML = Array(6).fill('<div class="card skeleton-shimmer skeleton-mini"></div>').join('');
+
+
 
   try {
     console.log('=== Dashboard Load Started ===');
@@ -1883,8 +1984,18 @@ async function load() {
     latestCollectionError = '';
     latestReadyToDispatchAmount = 0;
     window.selectedSupplier = '';
-    
-    const [dashboardData, outletResult, dealerBaseOutletJson, orderSummaryJson, deliverySummaryJson, targetAchievementJson, territoriesJson, collectionRows] = await Promise.all([
+
+    const [
+      dashboardData,
+      outletResult,
+      dealerBaseOutletJson,
+      orderSummaryJson,
+      deliverySummaryJson,
+      targetAchievementJson,
+      territoriesJson,
+      collectionRows,
+      checkinReportJson
+    ] = await Promise.all([
       fetchDashboardData(from, to),
       fetchSupplierOutletJson(from, to),
       fetchOutletReportJson(SALES_DEFAULT_FROM, dealerBaseTo, 1).catch((err) => {
@@ -1905,12 +2016,16 @@ async function load() {
         console.error('Collection fetch failed:', err);
         latestCollectionError = err.message || 'Collection fetch failed';
         return [];
+      }),
+      fetchCheckinReportJson(from, to, 1, '').catch((err) => {
+        console.error('Checkin report fetch failed:', err);
+        return [];
       })
     ]);
 
     console.log('Dashboard data received:', dashboardData);
     console.log('Outlet JSON received:', outletResult.outletJson);
-    
+
     const outletRows = outletResult.outletRows;
     const dealerBaseOutletRows = normalizeOutletRows(dealerBaseOutletJson);
     const outletSupplierLookup = buildOutletSupplierLookup(dealerBaseOutletRows);
@@ -1919,7 +2034,7 @@ async function load() {
     console.log('Normalized outlet rows:', outletRows);
     console.log('Supplier outlet fallback used:', outletResult.usedFallback);
     console.log('Total outlets visited:', dashboardData.outletsVisited);
-    
+
     const supplierVisitMix = buildSupplierVisitMix(dashboardData.outletsVisited, outletRows).slice(0, 5);
     const filteredSlicers = getTerritorySlicerState();
     const orderRows = enrichRowsWithSupplier(
@@ -1938,7 +2053,7 @@ async function load() {
         rowOutletCodeSelector: (row) => pickFlexibleRowValue(row, ['Outlet Code', 'outlet code', 'OutletCode', 'outletCode', 'Buyer Department Code', 'buyer department code'])
       }
     );
-    
+
     // Recalculate KPIs based on filtered territory data
     const filteredKpis = calculateFilteredKpis(dashboardData, orderRows, deliveryRows, outletRows, filteredSlicers);
     const effectiveCoverage = buildEffectiveCoverage(dashboardData.ordersCreated, dealerCount);
@@ -1953,7 +2068,9 @@ async function load() {
     console.log('Target achievement summary:', targetSummary);
     console.log('Collection summary:', collectionSummary);
     console.log('Effective coverage summary:', effectiveCoverage);
-    
+
+    const rawCheckinRows = typeof normalizeCheckinRows === 'function' ? normalizeCheckinRows(checkinReportJson) : (Array.isArray(checkinReportJson?.data) ? checkinReportJson.data : []);
+
     // Keep the KPI display aligned with the raw daily-reports totals.
     // Territory-filtered values still power the charts and operational analysis below.
     salesDashboardState = {
@@ -1964,6 +2081,7 @@ async function load() {
       orderRows,
       deliveryRows,
       collectionRows: normalizedCollectionRows,
+      rawCheckinRows,
       supplierVisitMix,
       targetSummary,
       dealerCount,
@@ -1971,19 +2089,41 @@ async function load() {
     };
 
     renderSalesDashboard(salesDashboardState);
-    
+
+    // Add fade-in-up animation to all cards and sections
+    document.querySelectorAll('#kpiGrid .kpi-card, #miniGrid .mini-card, .analytics-grid .card, .two-col .card, .single-chart-section .card').forEach((el, i) => {
+      el.classList.remove('fade-in-up');
+      void el.offsetWidth; // trigger reflow
+      el.style.animationDelay = `${0.05 + i * 0.06}s`;
+      el.classList.add('fade-in-up');
+    });
+
+    // Add Ultra-modern scrambling number animation
+    document.querySelectorAll('.kpi-value, .effective-coverage-value, .mini-card strong, .supplier-visit-side-value').forEach(el => {
+      const originalText = el.innerText;
+      if (!/\d/.test(originalText) || el.dataset.animated) return;
+      el.dataset.animated = true;
+      let ticks = 0;
+      const interval = setInterval(() => {
+        ticks++;
+        el.innerText = originalText.replace(/\d/g, () => Math.floor(Math.random() * 10));
+        if (ticks >= 18) { clearInterval(interval); el.innerText = originalText; }
+      }, 30);
+    });
+
     console.log('=== Dashboard Load Completed ===');
 
     const durationSec = ((performance.now() - loadStartTime) / 1000).toFixed(1);
     const now = new Date();
-    const formattedDate = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); 
+    const formattedDate = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
     const formattedTime = now.toLocaleTimeString('en-US');
-    
+
     document.getElementById('lastUpdated').innerHTML = `
-      <div style="text-align: center; font-size: 18px; font-weight: 600; color: #ffffff; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0; margin-right: 4px;">
-        <span><span style="color: rgba(255,255,255,0.7); font-weight: 500;">Last Updated:</span> ${formattedDate}, ${formattedTime}</span>
-        <span style="color: rgba(255,255,255,0.3);">|</span>
-        <span><span style="color: rgba(255,255,255,0.7); font-weight: 500;">Refreshed in:</span> ${durationSec} seconds</span>
+      <div style="text-align: right; width: 100%; font-size: 13px; font-weight: 600; color: #ffffff; padding: 4px 0; opacity: 0.9;">
+        <span class="live-pulse"></span>
+        <span style="color: rgba(255,255,255,0.7);">Last Updated:</span> ${formattedDate}, ${formattedTime}
+        <span style="color: rgba(255,255,255,0.3); margin: 0 8px;">|</span>
+        <span style="color: rgba(255,255,255,0.7);">Refreshed in:</span> ${durationSec}s
       </div>
     `;
   } catch (err) {
@@ -2022,6 +2162,67 @@ document.querySelectorAll('[data-logout]').forEach(el => {
     e.preventDefault();
     logout();
   };
+});
+
+function applyDatePreset(preset, btnContext) {
+  const toDate = new Date();
+  let fromDate = new Date();
+
+  switch (preset) {
+    case 'last7':
+      fromDate.setDate(toDate.getDate() - 7);
+      break;
+    case 'last14':
+      fromDate.setDate(toDate.getDate() - 14);
+      break;
+    case 'last30':
+      fromDate.setDate(toDate.getDate() - 30);
+      break;
+    case 'last60':
+      fromDate.setDate(toDate.getDate() - 60);
+      break;
+    case 'wtd':
+      const day = toDate.getDay();
+      const diff = toDate.getDate() - day + (day === 0 ? -6 : 1); // Monday start
+      fromDate = new Date(toDate.setDate(diff));
+      break;
+    case 'mtd':
+      fromDate = new Date(toDate.getFullYear(), toDate.getMonth(), 1);
+      break;
+  }
+
+  const formatDate = d => {
+    const yr = d.getFullYear();
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    const da = String(d.getDate()).padStart(2, '0');
+    return `${yr}-${mo}-${da}`;
+  };
+
+  if (dateFrom && dateTo) {
+    dateTo.value = formatDate(new Date());
+    dateFrom.value = formatDate(fromDate);
+
+    // Update active state
+    document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+    if (btnContext) btnContext.classList.add('active');
+
+    load();
+  }
+}
+
+document.querySelectorAll('.btn-preset').forEach(btn => {
+  btn.onclick = function () {
+    applyDatePreset(this.dataset.preset, this);
+  };
+});
+
+// Clear preset active state when manual dates are selected
+[dateFrom, dateTo].forEach(input => {
+  if (input) {
+    input.addEventListener('change', () => {
+      document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+    });
+  }
 });
 
 // Load dashboard on page load

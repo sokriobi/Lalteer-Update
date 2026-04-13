@@ -2,6 +2,43 @@ authGuard();
 
 let charts = {};
 const colors = { blue: '#61a7e8', green: '#2db86d', orange: '#f2b233', red: '#e25b57', purple: '#8f78ea', teal: '#26b8a6' };
+
+// Frosted Glass Custom Tooltip
+const getOrCreateTooltip = (chart) => {
+  let tooltipEl = chart.canvas.parentNode.querySelector('.chartjs-tooltip');
+  if (!tooltipEl) {
+    tooltipEl = document.createElement('div');
+    tooltipEl.classList.add('chartjs-tooltip');
+    tooltipEl.style.position = 'absolute';
+    tooltipEl.style.pointerEvents = 'none';
+    tooltipEl.style.transition = 'all 0.15s ease';
+    chart.canvas.parentNode.appendChild(tooltipEl);
+  }
+  return tooltipEl;
+};
+Chart.defaults.plugins.tooltip.enabled = false;
+Chart.defaults.plugins.tooltip.external = function(context) {
+  const { chart, tooltip } = context;
+  const tooltipEl = getOrCreateTooltip(chart);
+  if (tooltip.opacity === 0) { tooltipEl.style.opacity = '0'; return; }
+  if (tooltip.body) {
+    const titleLines = tooltip.title || [];
+    const bodyLines = tooltip.body.map(b => b.lines);
+    let html = '';
+    titleLines.forEach(t => { html += `<div style="font-size:12px;font-weight:800;color:rgba(255,255,255,0.7);margin-bottom:4px;text-transform:uppercase;letter-spacing:0.04em">${t}</div>`; });
+    bodyLines.forEach((body, i) => {
+      const clrs = tooltip.labelColors[i];
+      const dot = `<span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:${clrs.backgroundColor};margin-right:6px"></span>`;
+      body.forEach(line => { html += `<div style="display:flex;align-items:center;font-size:13px;font-weight:600;color:#f5fbf6">${dot}${line}</div>`; });
+    });
+    tooltipEl.innerHTML = html;
+  }
+  const { offsetLeft: posX, offsetTop: posY } = chart.canvas;
+  tooltipEl.style.opacity = '1';
+  tooltipEl.style.left = posX + tooltip.caretX + 'px';
+  tooltipEl.style.top = posY + tooltip.caretY + 'px';
+  tooltipEl.style.transform = 'translate(-50%, -110%)';
+};
 const visitCoverageColors = { visited: '#6CB6FF', notVisited: '#F5B51B' };
 const OUTLET_MASTER_FROM = '2018-08-01';
 const CHECKIN_TERRITORY_ID = 2;
@@ -193,7 +230,7 @@ function renderVisitKpis(d) {
   document.getElementById('visitKpiGrid').innerHTML = [
     ['Total Visit', fmtNumber(d.totalVisit ?? d.outletsVisited), '', colors.teal, 'TV', false],
     ['Unique Visited', uniqueVisited.display, uniqueVisited.percentDisplay, colors.green, 'UV', true],
-    ['Average Time Spent per Dealer', `${fmtNumber(d.avgTimeSpentPerDealer)} min`, '', colors.orange, 'AT', false]
+    ['Average Time<br>Spent per Dealer', `${fmtNumber(d.avgTimeSpentPerDealer)} min`, '', colors.orange, 'AT', false]
   ].map((k) => {
     if (k[5]) {
       return `<div class="card kpi-card" style="--accent:${k[3]}"><div class="kpi-top"><div class="kpi-copy"><div class="kpi-label">${k[0]}</div><div class="effective-coverage-row"><div class="kpi-value effective-coverage-value">${k[1]}</div><div class="effective-coverage-percent">${k[2]}</div></div></div><div class="kpi-icon">${k[4]}</div></div></div>`;
@@ -492,7 +529,7 @@ async function load() {
   const dealerBaseTo = new Date().toISOString().slice(0, 10);
   const slicers = getTerritorySlicerState();
   const loadStartTime = performance.now();
-  document.getElementById('lastUpdated').innerHTML = '<div style="text-align: center; font-size: 20px; color: #ffffff; font-weight: 600; margin-right: 4px;">Loading...</div>';
+  document.getElementById('lastUpdated').innerHTML = '<div style="text-align: right; width: 100%; font-size: 14px; color: #ffffff; font-weight: 600; padding: 4px 0;"><span class="live-pulse"></span> Loading Dashboard...</div>';
 
   try {
     const [d, dealerBaseOutletJson, checkinJson, orderSummaryJson, deliverySummaryJson, territoriesJson, userBulkJson] = await Promise.all([
@@ -527,40 +564,52 @@ async function load() {
     const checkinRows = normalizeCheckinRows(checkinJson);
     const userRows = normalizeUserBulkRows(userBulkJson);
     territoryMasterRows = normalizeTerritoryRows(territoriesJson);
+    populateTerritorySlicers(territoryMasterRows, slicers);
+    
+    // Check if territory is actually filtered
+    const isTerrFiltered = slicers && (slicers.dmTerritory !== 'All' || slicers.rmTerritory !== 'All' || slicers.tmArea !== 'All');
+
     const filteredCheckinRows = filterCheckinRowsByTerritory(checkinRows, territoryMasterRows, slicers);
     const orderRows = filterOrderRowsByTerritory(normalizeOrderRows(orderSummaryJson), territoryMasterRows, slicers);
     const deliveryRows = filterOrderRowsByTerritory(normalizeDeliveryRows(deliverySummaryJson), territoryMasterRows, slicers);
-    populateTerritorySlicers(territoryMasterRows, slicers);
+
+    // Filter base rows so coverage and users reflect the selected territory
+    const activeDealerBase = isTerrFiltered ? filterOutletRowsByTerritory(dealerBaseOutletRows, slicers) : dealerBaseOutletRows;
+    const activeUserRows = isTerrFiltered ? filterUserRowsByTerritory(userRows, slicers) : userRows;
     
-    const dealerCount = resolveDealerCount(dealerBaseOutletJson, dealerBaseOutletRows);
+    const dealerCount = isTerrFiltered ? activeDealerBase.length : resolveDealerCount(dealerBaseOutletJson, dealerBaseOutletRows);
     const uniqueVisitedCount = countDistinctVisitedDepartments(filteredCheckinRows);
-    const visitCoverageSummary = buildVisitCoverageSummary(filteredCheckinRows, dealerBaseOutletRows);
+    const visitCoverageSummary = buildVisitCoverageSummary(filteredCheckinRows, activeDealerBase);
+    
     visitCoverageSummary.totalDealer = dealerCount;
     visitCoverageSummary.visited = uniqueVisitedCount;
     visitCoverageSummary.notVisited = Math.max(dealerCount - uniqueVisitedCount, 0);
     visitCoverageSummary.visitedPct = safeDiv(uniqueVisitedCount, dealerCount);
     visitCoverageSummary.notVisitedPct = safeDiv(visitCoverageSummary.notVisited, dealerCount);
 
+    const calculatedKpis = calculateFilteredKpis(d, orderRows, deliveryRows, activeDealerBase, slicers);
+    const displayedOrdersCreated = isTerrFiltered ? calculatedKpis.ordersCreated : Number(d.ordersCreated || 0);
+
     // Calculate filtered KPIs based on selected territory
     const filteredD = {
-      ...calculateFilteredKpis(d, orderRows, deliveryRows, filteredCheckinRows, slicers),
-      ordersCreated: Number(d.ordersCreated || 0),
-      totalVisit: Number(d.outletsVisited || 0),
-      outletsVisited: visitCoverageSummary.visited,
-      orderPerOutlet: visitCoverageSummary.visited > 0 ? Number(d.ordersCreated || 0) / visitCoverageSummary.visited : 0,
+      ...calculatedKpis,
+      ordersCreated: displayedOrdersCreated,
+      totalVisit: isTerrFiltered ? uniqueVisitedCount : Number(d.outletsVisited || 0),
+      outletsVisited: uniqueVisitedCount,
+      orderPerOutlet: uniqueVisitedCount > 0 ? displayedOrdersCreated / uniqueVisitedCount : 0,
       avgTimeSpentPerDealer: calculateAverageTimeSpent(filteredCheckinRows)
     };
     filteredD.uniqueVisited = {
       visited: Number(uniqueVisitedCount || 0),
-      dealerCount: Number(visitCoverageSummary.totalDealer || 0),
-      percent: safeDiv(uniqueVisitedCount, visitCoverageSummary.totalDealer),
-      display: `${formatWholeNumber(uniqueVisitedCount)} /${formatWholeNumber(visitCoverageSummary.totalDealer)}`,
-      percentDisplay: fmtPct(safeDiv(uniqueVisitedCount, visitCoverageSummary.totalDealer))
+      dealerCount: Number(dealerCount || 0),
+      percent: safeDiv(uniqueVisitedCount, dealerCount),
+      display: `${formatWholeNumber(uniqueVisitedCount)} /${formatWholeNumber(dealerCount)}`,
+      percentDisplay: fmtPct(safeDiv(uniqueVisitedCount, dealerCount))
     };
-    filteredD.effectiveCoverage = buildEffectiveCoverage(Number(d.ordersCreated || 0), dealerCount);
+    filteredD.effectiveCoverage = buildEffectiveCoverage(displayedOrdersCreated, dealerCount);
     console.log('Visit dashboard filtered KPIs:', filteredD);
 
-    const roleUserSummary = buildRoleUserSummary(userRows, filteredCheckinRows);
+    const roleUserSummary = buildRoleUserSummary(activeUserRows, filteredCheckinRows);
 
     const hourlySummary = buildHourlyVisitSummary(
       filteredCheckinRows
@@ -585,16 +634,38 @@ async function load() {
     renderDmTerritoryTable(dmTerritorySummary);
     renderVisitInsights(filteredD);
 
+    // Fade-in animation
+    document.querySelectorAll('#visitKpiGrid .kpi-card, #visitMiniGrid .mini-card, .analytics-grid .card, .two-col .card, .single-chart-section .card').forEach((el, i) => {
+      el.classList.remove('fade-in-up');
+      void el.offsetWidth;
+      el.style.animationDelay = `${0.05 + i * 0.06}s`;
+      el.classList.add('fade-in-up');
+    });
+
+    // Number scramble animation
+    document.querySelectorAll('.kpi-value, .effective-coverage-value, .mini-card strong').forEach(el => {
+      const originalText = el.innerText;
+      if (!/\d/.test(originalText) || el.dataset.animated) return;
+      el.dataset.animated = true;
+      let ticks = 0;
+      const interval = setInterval(() => {
+        ticks++;
+        el.innerText = originalText.replace(/\d/g, () => Math.floor(Math.random() * 10));
+        if (ticks >= 18) { clearInterval(interval); el.innerText = originalText; }
+      }, 30);
+    });
+
     const durationSec = ((performance.now() - loadStartTime) / 1000).toFixed(1);
     const now = new Date();
     const formattedDate = now.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }); 
     const formattedTime = now.toLocaleTimeString('en-US');
     
     document.getElementById('lastUpdated').innerHTML = `
-      <div style="text-align: center; font-size: 18px; font-weight: 600; color: #ffffff; display: flex; justify-content: center; align-items: center; flex-wrap: wrap; gap: 10px; padding: 12px 0; margin-right: 4px;">
-        <span><span style="color: rgba(255,255,255,0.7); font-weight: 500;">Last Updated:</span> ${formattedDate}, ${formattedTime}</span>
-        <span style="color: rgba(255,255,255,0.3);">|</span>
-        <span><span style="color: rgba(255,255,255,0.7); font-weight: 500;">Refreshed in:</span> ${durationSec} seconds</span>
+      <div style="text-align: right; width: 100%; font-size: 13px; font-weight: 600; color: #ffffff; padding: 4px 0; opacity: 0.9;">
+        <span class="live-pulse"></span>
+        <span style="color: rgba(255,255,255,0.7);">Last Updated:</span> ${formattedDate}, ${formattedTime}
+        <span style="color: rgba(255,255,255,0.3); margin: 0 8px;">|</span>
+        <span style="color: rgba(255,255,255,0.7);">Refreshed in:</span> ${durationSec}s
       </div>
     `;
   } catch (err) {
@@ -656,5 +727,40 @@ if (toggleDmTableBtn) {
   });
 }
 document.querySelectorAll('[data-logout]').forEach((el) => el.onclick = (e) => { e.preventDefault(); logout(); });
+
+// Preset date buttons
+function applyDatePreset(preset, btnContext) {
+  const toDate = new Date();
+  let fromDate = new Date();
+  switch (preset) {
+    case 'last7': fromDate.setDate(toDate.getDate() - 7); break;
+    case 'last14': fromDate.setDate(toDate.getDate() - 14); break;
+    case 'last30': fromDate.setDate(toDate.getDate() - 30); break;
+    case 'last60': fromDate.setDate(toDate.getDate() - 60); break;
+    case 'wtd':
+      const day = toDate.getDay();
+      const diff = toDate.getDate() - day + (day === 0 ? -6 : 1);
+      fromDate = new Date(toDate.setDate(diff));
+      break;
+    case 'mtd': fromDate = new Date(toDate.getFullYear(), toDate.getMonth(), 1); break;
+  }
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  if (dateFrom && dateTo) {
+    dateTo.value = fmt(new Date());
+    dateFrom.value = fmt(fromDate);
+    document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+    if (btnContext) btnContext.classList.add('active');
+    load();
+  }
+}
+document.querySelectorAll('.btn-preset').forEach(btn => {
+  btn.onclick = function() { applyDatePreset(this.dataset.preset, this); };
+});
+[dateFrom, dateTo].forEach(input => {
+  if (input) input.addEventListener('change', () => {
+    document.querySelectorAll('.btn-preset').forEach(b => b.classList.remove('active'));
+  });
+});
+
 load();
 

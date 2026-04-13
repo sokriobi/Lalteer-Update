@@ -1210,13 +1210,19 @@ function calculateFilteredKpis(originalData, orderRows, deliveryRows, outletRows
   // Calculate filtered amounts from delivery summary
   const filteredDeliveredAmount = deliveryRows.reduce((sum, row) => sum + (Number(row.amount) || 0), 0);
 
-  // Count unique employee codes from filtered order rows (proxy for unique outlets visited in selected territory)
-  const uniqueEmployeeCodes = new Set();
+  let filteredOutletsVisited = 0;
+  const uniqueOrderOutlets = new Set();
   orderRows.forEach((row) => {
-    const code = String(row.employeeCode || '').trim();
-    if (code) uniqueEmployeeCodes.add(code);
+    const code = row.buyerDepartmentCode || row.sellerDepartmentCode;
+    if (code && code !== 'Unknown') uniqueOrderOutlets.add(code);
   });
-  const filteredOutletsVisited = Math.max(uniqueEmployeeCodes.size, outletRows.length || 1);
+  filteredOutletsVisited = uniqueOrderOutlets.size || 1;
+
+  // Ensure total visits is at least equal to the number of productive distinct orders
+  if (orderRows.length > 0) {
+    const distinctTrackingIds = new Set(orderRows.map(r => r.trackingId).filter(Boolean)).size || 1;
+    filteredOutletsVisited = Math.max(filteredOutletsVisited, distinctTrackingIds);
+  }
 
   // Check if any territory filter or supplier filter is actually active
   const isTerrFiltered = slicers && (slicers.dmTerritory !== 'All' || slicers.rmTerritory !== 'All' || slicers.tmArea !== 'All');

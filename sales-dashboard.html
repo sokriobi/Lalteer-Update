@@ -62,20 +62,30 @@
               <h1>Sales Dashboard</h1>
             </div>
           </div>
-          <div class="filter-bar">
-            <select id="dmTerritoryFilter">
-              <option value="All">DM Territory</option>
-            </select>
-            <select id="rmTerritoryFilter">
-              <option value="All">RM Territory</option>
-            </select>
-            <select id="tmAreaFilter">
-              <option value="All">TM Area</option>
-            </select>
-            <input type="date" id="dateFrom">
-            <input type="date" id="dateTo">
-            <button class="btn btn-primary" id="btnApply">Apply</button>
-            <button class="btn btn-secondary" id="btnRefresh">Refresh</button>
+          <div style="display: flex; flex-direction: column; gap: 8px; align-items: flex-end; margin-left: auto;">
+            <div class="filter-bar preset-date-bar" style="margin-bottom: 0; padding: 6px 10px; background: rgba(0,0,0,0.15); border: 1px solid rgba(255,255,255,0.08); box-shadow: none; gap: 6px; flex-wrap: wrap; justify-content: flex-end;">
+              <button class="btn btn-preset" data-preset="last7">Last 7 Days</button>
+              <button class="btn btn-preset" data-preset="last14">Last 14 Days</button>
+              <button class="btn btn-preset" data-preset="last30">Last 30 Days</button>
+              <button class="btn btn-preset" data-preset="last60">Last 60 Days</button>
+              <button class="btn btn-preset" data-preset="wtd">WTD</button>
+              <button class="btn btn-preset" data-preset="mtd">MTD</button>
+            </div>
+            <div class="filter-bar" style="margin-bottom: 0;">
+              <select id="dmTerritoryFilter">
+                <option value="All">DM Territory</option>
+              </select>
+              <select id="rmTerritoryFilter">
+                <option value="All">RM Territory</option>
+              </select>
+              <select id="tmAreaFilter">
+                <option value="All">TM Area</option>
+              </select>
+              <input type="date" id="dateFrom">
+              <input type="date" id="dateTo">
+              <button class="btn btn-primary" id="btnApply">Apply</button>
+              <button class="btn btn-secondary" id="btnRefresh">Refresh</button>
+            </div>
           </div>
         </div>
         <div class="meta-row">

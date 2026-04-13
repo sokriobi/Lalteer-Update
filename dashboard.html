@@ -53,11 +53,30 @@
               <p>Cleaner, lighter, branded visualization using the same live Lalteer API data.</p>
             </div>
           </div>
-          <div class="filter-bar">
-            <input type="date" id="dateFrom">
-            <input type="date" id="dateTo">
-            <button class="btn btn-primary" id="btnApply">Apply</button>
-            <button class="btn btn-secondary" id="btnRefresh">Refresh</button>
+          <div style="display: flex; flex-direction: column; gap: 10px; align-items: flex-end;">
+            <div class="filter-bar" style="margin-bottom: 0;">
+              <input type="date" id="dateFrom">
+              <input type="date" id="dateTo">
+              <button class="btn btn-primary" id="btnApply">Apply</button>
+              <button class="btn btn-secondary" id="btnRefresh">Refresh</button>
+            </div>
+            <div class="filter-bar relative-filter-bar" style="padding: 6px 12px; background: rgba(0,0,0,0.12); border: 1px solid rgba(255,255,255,0.08); box-shadow: none;">
+              <span style="font-size: 13px; font-weight: 700; color: rgba(255,255,255,0.85); margin-right: 4px;">Relative Range:</span>
+              <select id="relativeDateMode" style="height: 36px; min-width: 80px;">
+                <option value="Last" selected>Last</option>
+                <option value="Next">Next</option>
+                <option value="This">This</option>
+              </select>
+              <input type="number" id="relativeDateCount" value="1" min="1" max="999" style="height: 36px; width: 64px; text-align: center;">
+              <select id="relativeDateUnit" style="height: 36px; min-width: 140px;">
+                <option value="Days">Days</option>
+                <option value="Weeks">Weeks</option>
+                <option value="Weeks (Calendar)">Weeks (Calendar)</option>
+                <option value="Months">Months</option>
+                <option value="Months (Calendar)" selected>Months (Calendar)</option>
+              </select>
+              <button class="btn btn-secondary" id="btnApplyRelative" style="height: 36px; padding: 0 16px; font-size: 13px; border-color: rgba(255,255,255,0.3);">Apply</button>
+            </div>
           </div>
         </div>
         <div class="meta-row">
